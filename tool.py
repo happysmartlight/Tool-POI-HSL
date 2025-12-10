@@ -34,32 +34,38 @@ class BMPConverter(QWidget):
         ctl = QHBoxLayout()
         main.addLayout(ctl)
 
-        btn_open = QPushButton("Mở ảnh...")
+        btn_open = QPushButton("📁 Chọn ảnh...")
         btn_open.clicked.connect(self.open_image)
         ctl.addWidget(btn_open)
 
-        ctl.addWidget(QLabel("Chiều rộng (px, vuông):"))
-        self.entry_width = QLineEdit("128")
+        ctl.addWidget(QLabel("🔧 Pixel POI (15-72):"))
+        self.entry_width = QLineEdit("72")
         self.entry_width.setFixedWidth(80)
         ctl.addWidget(self.entry_width)
 
-        btn_preview = QPushButton("Xem trước")
+        btn_preview = QPushButton("👀 Xem trước")
         btn_preview.clicked.connect(self.preview_convert)
         ctl.addWidget(btn_preview)
 
-        btn_save = QPushButton("Lưu BMP 24-bit...")
+        btn_save = QPushButton("💾 Lưu POI BMP...")
         btn_save.clicked.connect(self.save_as_bmp)
         ctl.addWidget(btn_save)
 
-        btn_multi = QPushButton("Chuyển nhiều ảnh...")
-        btn_multi.clicked.connect(self.convert_multiple)
-        ctl.addWidget(btn_multi)
-
-        btn_quit = QPushButton("Thoát")
+        btn_quit = QPushButton("❌ Thoát")
         btn_quit.clicked.connect(self.close)
         ctl.addWidget(btn_quit)
 
         ctl.addStretch(1)
+
+        # ---- dòng tùy chọn đặc biệt ----
+        ctl2 = QHBoxLayout()
+        main.addLayout(ctl2)
+
+        btn_multi = QPushButton("✨ Chuyển nhiều ảnh… (Batch)")
+        btn_multi.clicked.connect(self.convert_multiple)
+        ctl2.addWidget(btn_multi)
+
+        ctl2.addStretch(1)
 
         # === label thông tin ===
         self.lbl_info = QLabel("Chưa tải ảnh.")
@@ -76,8 +82,21 @@ class BMPConverter(QWidget):
         frm_layout.addWidget(self.lbl_preview)
 
         # footer
-        footer = QLabel("Lưu ý: Ảnh sẽ được crop chính giữa thành hình vuông rồi resize theo chiều rộng bạn nhập.")
+        footer = QLabel(
+            """
+            <div style='text-align:center;'>
+                📝 <b>Lưu ý:</b> Ảnh sẽ được crop chính giữa thành hình vuông rồi resize theo chiều rộng bạn nhập.<br><br>
+                📌 Output được sử dụng cho phần cứng
+                <b>ARGB của Happy Smart Light</b>,<br>
+                chuyên biệt cho tính năng <b>Quay POI LED</b>.
+            </div>
+            """
+        )
+        footer.setTextFormat(Qt.RichText)
+        footer.setAlignment(Qt.AlignCenter)
+        footer.setWordWrap(True)
         main.addWidget(footer)
+
 
     def show_contact(self):
         text = (
@@ -153,12 +172,27 @@ class BMPConverter(QWidget):
     def _get_target_width(self):
         try:
             w = int(self.entry_width.text())
-            if w <= 0:
-                raise Exception()
-            return w
         except:
-            QMessageBox.warning(self, "Lỗi", "Chiều rộng không hợp lệ.")
+            self._warn_width("Giá trị không hợp lệ! Vui lòng nhập số.")
             return None
+
+        if w < 15 or w > 72:
+            self._warn_width("Giá trị phải nằm trong khoảng 15 đến 72 pixel.")
+            return None
+
+        # reset màu
+        self.entry_width.setStyleSheet("")
+        return w
+
+    def _warn_width(self, msg):
+        self.entry_width.setStyleSheet("background:#ffb1b1;")
+        QMessageBox.warning(
+            self, 
+            "Sai thông số",
+            f"<font color='red'><b>{msg}</b></font><br><br>"
+            "Gợi ý: POI HSL đề xuất sử dụng từ 15 → 72 pixel."
+        )
+
 
     # ====================
     # Open image
@@ -210,7 +244,7 @@ class BMPConverter(QWidget):
         return QPixmap.fromImage(qimg)
 
     # ====================
-    # Save BMP
+    # Save BMP (kèm dung lượng + khuyến nghị)
     # ====================
     def save_as_bmp(self):
         if self.loaded_image is None:
@@ -223,10 +257,14 @@ class BMPConverter(QWidget):
 
         im2 = self._convert_to_square_rgb(w, self.loaded_image)
 
+        default_name = os.path.splitext(os.path.basename(self.input_path))[0] + ".bmp"
+
         path, _ = QFileDialog.getSaveFileName(
-            self, "Lưu BMP",
-            filter="BMP files (*.bmp)",
-            )        
+            self, 
+            "Lưu BMP",
+            default_name,
+            "BMP files (*.bmp)"
+        )      
         if not path:
             return
 
@@ -235,9 +273,45 @@ class BMPConverter(QWidget):
 
         try:
             im2.save(path, "BMP")
-            QMessageBox.information(self, "OK", f"Đã lưu:\n{path}")
+
+            # ==== size ====
+            size_bytes = os.path.getsize(path)
+            
+            if size_bytes < 1024:
+                human = f"{size_bytes} bytes"
+            elif size_bytes < 1024*1024:
+                human = f"{size_bytes/1024:.1f} KB"
+            else:
+                human = f"{size_bytes/1024/1024:.2f} MB"
+
+            # ==== đánh giá POI ====
+            if size_bytes < 63 * 1024:
+                comment = "<font color='green'><b>Sử dụng tốt cho POI HSL ✓</b></font>"
+            else:
+                comment = "<font color='red'><b>⚠ Không phù hợp cho POI HSL (file quá lớn)</b></font>"
+
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Đã lưu")
+            msg.setText(
+                f"Đã lưu: {path}<br>"
+                f"Dung lượng: <b>{human}</b><br><br>"
+                f"{comment}"
+            )
+            msg.setIcon(QMessageBox.Information)
+
+            btn_open = msg.addButton("Mở thư mục", QMessageBox.ActionRole)
+            btn_ok    = msg.addButton("Đóng", QMessageBox.AcceptRole)
+
+            msg.exec()
+
+            if msg.clickedButton() == btn_open:
+                folder = os.path.dirname(path)
+                QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+
+
         except Exception as e:
             QMessageBox.critical(self, "Lỗi", str(e))
+
 
     # ====================
     # Convert multiple files
@@ -262,7 +336,8 @@ class BMPConverter(QWidget):
         if not out_dir:
             return
 
-        count = 0
+        report = []   # danh sách thông tin
+
         for f in files:
             try:
                 im = Image.open(f)
@@ -270,15 +345,48 @@ class BMPConverter(QWidget):
                 name = os.path.splitext(os.path.basename(f))[0] + ".bmp"
                 out_path = os.path.join(out_dir, name)
                 im2.save(out_path, "BMP")
-                count += 1
-            except Exception as e:
-                print("Lỗi xử lý file:", f, e)
 
-        QMessageBox.information(
-            self,
-            "Hoàn thành",
-            f"Đã xử lý {count} ảnh\nLưu tại:\n{out_dir}"
-        )
+                # ==== size ====
+                size_bytes = os.path.getsize(out_path)
+                
+                # format đẹp
+                if size_bytes < 1024:
+                    sz = f"{size_bytes} bytes"
+                elif size_bytes < 1024*1024:
+                    sz = f"{size_bytes/1024:.1f} KB"
+                else:
+                    sz = f"{size_bytes/1024/1024:.2f} MB"
+
+                # đánh giá
+                if size_bytes < 63 * 1024:
+                    status = "<font color='green'>✓ Hợp lệ cho POI</font>"
+                else:
+                    status = "<font color='red'>⚠ Quá lớn, không phù hợp</font>"
+
+                report.append(f"<b>{name}</b> ({sz}) — {status}")
+
+            except Exception as e:
+                report.append(f"<b>{os.path.basename(f)}</b> — <font color='red'>Lỗi: {e}</font>")
+
+            html = "<br>".join(report)
+
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Hoàn thành")
+            msg.setTextFormat(Qt.RichText)
+            msg.setText(
+                f"Đã xử lý {len(files)} ảnh<br><br>"
+                f"Lưu tại:<br><b>{out_dir}</b><br><br>"
+                f"{html}"
+            )
+
+            # thêm button mở thư mục
+            btn_open = msg.addButton("Mở thư mục", QMessageBox.ActionRole)
+            msg.addButton("Đóng", QMessageBox.AcceptRole)
+
+            msg.exec()
+
+            if msg.clickedButton() == btn_open:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(out_dir))
 
 
 # ====================
