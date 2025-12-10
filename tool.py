@@ -1,5 +1,11 @@
 import sys
 import os
+import socket
+import json
+import ipaddress
+from concurrent.futures import ThreadPoolExecutor
+import requests
+
 from PIL import Image
 from PySide6.QtWidgets import *
 from PySide6.QtCore import *
@@ -11,6 +17,7 @@ APP_VERSION = "v1.2 - 2025"
 APP_COMPANY = "Happy Smart Light"
 
 
+
 class BMPConverter(QWidget):
 
     def __init__(self):
@@ -18,7 +25,7 @@ class BMPConverter(QWidget):
 
         self.setWindowTitle(APP_TITLE)
         self.setWindowIcon(QIcon("favicon.ico"))
-        self.resize(820, 600)
+        self.resize(820, 650)  # tăng chiều cao để thêm combobox scan
 
         self.input_path = None
         self.loaded_image = None
@@ -30,7 +37,7 @@ class BMPConverter(QWidget):
         # ==== menu ====
         self._make_menu()
 
-        # ==== controls ====
+        # ==== controls chính ====
         ctl = QHBoxLayout()
         main.addLayout(ctl)
 
@@ -57,7 +64,7 @@ class BMPConverter(QWidget):
 
         ctl.addStretch(1)
 
-        # ---- dòng tùy chọn đặc biệt ----
+        # ==== dòng tùy chọn đặc biệt ====
         ctl2 = QHBoxLayout()
         main.addLayout(ctl2)
 
@@ -67,11 +74,31 @@ class BMPConverter(QWidget):
 
         ctl2.addStretch(1)
 
-        # === label thông tin ===
+        # ==== combobox scan ARGB ====
+        ctl3 = QHBoxLayout()
+        main.addLayout(ctl3)
+
+        self.combo_ip = QComboBox()
+        self.combo_ip.setEditable(True)
+        self.combo_ip.setMinimumWidth(200)
+        ctl3.addWidget(QLabel("🌐 Chọn/mạch ARGB:"))
+        ctl3.addWidget(self.combo_ip)
+
+
+        btn_scan = QPushButton("🔍 Scan ARGB")
+        btn_scan.clicked.connect(self.scan_wled)
+        ctl3.addWidget(btn_scan)
+        # ctl3.addStretch(1)
+
+        btn_send = QPushButton("📤 Gửi BMP đến ARGB")
+        btn_send.clicked.connect(self.send_to_wled)
+        ctl3.addWidget(btn_send)
+
+        # ==== label thông tin ====
         self.lbl_info = QLabel("Chưa tải ảnh.")
         main.addWidget(self.lbl_info)
 
-        # === vùng preview ===
+        # ==== vùng preview ====
         frame = QFrame()
         frame.setStyleSheet("border:1px solid gray;")
         main.addWidget(frame, 1)
@@ -81,7 +108,7 @@ class BMPConverter(QWidget):
         self.lbl_preview.setAlignment(Qt.AlignCenter)
         frm_layout.addWidget(self.lbl_preview)
 
-        # footer
+        # ==== footer ====
         footer = QLabel(
             """
             <div style='text-align:center;'>
@@ -97,6 +124,50 @@ class BMPConverter(QWidget):
         footer.setWordWrap(True)
         main.addWidget(footer)
 
+    # ====================
+    # Scan ARGB (nhanh, song song)
+    # ====================
+    def scan_wled(self):
+        # chuẩn bị combobox
+        self.combo_ip.clear()
+        self.combo_ip.addItem("Đang quét UDP...")
+
+        QApplication.processEvents()  # cập nhật GUI
+
+        # subnet mặc định, có thể sửa
+        subnet, ok = QInputDialog.getText(
+            self, "Subnet quét", "Nhập subnet (vd: 192.168.1.0/24):", text="192.168.1.0/24"
+        )
+        if not ok or not subnet:
+            self.combo_ip.clear()
+            self.combo_ip.addItem("Hủy quét")
+            return
+
+        ips = [str(ip) for ip in ipaddress.IPv4Network(subnet, strict=False)]
+        found = []
+
+        def check_ip(ip):
+            try:
+                url = f"http://{ip}/json"
+                r = requests.get(url, timeout=0.25)
+                j = r.json()
+                if "info" in j and j["info"].get("ver", "").startswith("2.0_HSL"):
+                    print(f"[DEBUG] Phát hiện ARGB HSL: {ip}")
+                    return ip
+            except:
+                return None
+
+        with ThreadPoolExecutor(max_workers=50) as ex:
+            for res in ex.map(check_ip, ips):
+                if res:
+                    found.append(res)
+
+        # cập nhật combobox GUI
+        self.combo_ip.clear()
+        if found:
+            self.combo_ip.addItems(found)
+        else:
+            self.combo_ip.addItem("Không tìm thấy mạch ARGB HSL")
 
     def show_contact(self):
         text = (
@@ -387,6 +458,53 @@ class BMPConverter(QWidget):
 
             if msg.clickedButton() == btn_open:
                 QDesktopServices.openUrl(QUrl.fromLocalFile(out_dir))
+
+
+    def send_to_wled(self):
+        if self.loaded_image is None:
+            QMessageBox.warning(self, "Chưa có ảnh", "Vui lòng mở ảnh trước.")
+            return
+
+        # Lấy IP từ combobox
+        ip = self.combo_ip.currentText()
+        if not ip or "Không tìm thấy" in ip or "Đang quét" in ip:
+            QMessageBox.warning(self, "Chưa chọn mạch", "Vui lòng chọn mạch ARGB hợp lệ.")
+            return
+
+        # Lưu file tạm trước khi gửi
+        w = self._get_target_width()
+        if not w:
+            return
+
+        im2 = self._convert_to_square_rgb(w, self.loaded_image)
+        import tempfile
+        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".bmp")
+        im2.save(tmp_file.name, "BMP")
+        tmp_file.close()
+
+        # Dùng requests để upload thay vì gọi curl ngoài
+        try:
+            import requests
+            url = f"http://{ip}/upload"
+            with open(tmp_file.name, "rb") as f:
+                files = {"data": f}
+                r = requests.post(url, files=files, timeout=3)
+            if r.status_code == 200:
+                QMessageBox.information(self, "Hoàn tất", f"Đã gửi BMP đến {ip} thành công!")
+            else:
+                msg = QMessageBox(self)
+                msg.setWindowTitle("Lỗi")
+                msg.setText(f"Gửi không thành công! HTTP {r.status_code}")
+                # Thêm nút mở trang settings/sec
+                btn_open = msg.addButton("Mở mã PIN ARGB", QMessageBox.ActionRole)
+                msg.addButton("Đóng", QMessageBox.RejectRole)
+                msg.exec()
+                if msg.clickedButton() == btn_open:
+                    QDesktopServices.openUrl(QUrl(f"http://{ip}/settings/sec"))
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi", f"Không thể gửi BMP:\n{e}")
+        finally:
+            os.unlink(tmp_file.name)
 
 
 # ====================
