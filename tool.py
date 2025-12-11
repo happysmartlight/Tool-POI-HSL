@@ -13,11 +13,19 @@ from PySide6.QtWidgets import *
 from PySide6.QtCore import *
 from PySide6.QtGui import *
 
-
-APP_TITLE   = "Phần mềm chuyển đổi ảnh qua POI HSL"
 APP_VERSION = "v1.2 - 2025"
+APP_TITLE   = "Phần mềm chuyển đổi ảnh qua POI HSL " + APP_VERSION
 APP_COMPANY = "Happy Smart Light"
 
+# ====================
+# Resource path (cho PyInstaller)
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS   # Thư mục tạm khi chạy EXE
+    except Exception:
+        base_path = os.path.abspath(".")  # Khi chạy file .py
+
+    return os.path.join(base_path, relative_path)
 
 
 class BMPConverter(QWidget):
@@ -56,13 +64,9 @@ class BMPConverter(QWidget):
         btn_preview.clicked.connect(self.preview_convert)
         ctl.addWidget(btn_preview)
 
-        btn_save = QPushButton("💾 Lưu POI BMP...")
+        btn_save = QPushButton("💾 Lưu tệp ảnh POI ...")
         btn_save.clicked.connect(self.save_as_bmp)
         ctl.addWidget(btn_save)
-
-        btn_quit = QPushButton("❌ Thoát")
-        btn_quit.clicked.connect(self.close)
-        ctl.addWidget(btn_quit)
 
         ctl.addStretch(1)
 
@@ -93,7 +97,7 @@ class BMPConverter(QWidget):
         # ctl3.addStretch(1)
 
         btn_send = QPushButton("📤 Gửi BMP đến ARGB")
-        btn_send.clicked.connect(self.send_to_wled)
+        btn_send.clicked.connect(self.send_to_argb)
         ctl3.addWidget(btn_send)
 
         btn_off = QPushButton("💡 Tắt LED ARGB")
@@ -115,20 +119,47 @@ class BMPConverter(QWidget):
         frm_layout.addWidget(self.lbl_preview)
 
         # ==== footer ====
-        footer = QLabel(
-            """
-            <div style='text-align:center;'>
-                📝 <b>Lưu ý:</b> Ảnh sẽ được crop chính giữa thành hình vuông rồi resize theo chiều rộng bạn nhập.<br><br>
-                📌 Output được sử dụng cho phần cứng
-                <b>ARGB của Happy Smart Light</b>,<br>
-                chuyên biệt cho tính năng <b>Quay POI LED</b>.
-            </div>
-            """
+        footer_widget = QWidget()
+        footer_layout = QHBoxLayout(footer_widget)
+        footer_layout.setContentsMargins(0,0,0,0)
+        footer_layout.setSpacing(10)
+
+        # Logo HSL
+        pixmap_hsl = QPixmap(resource_path("hsl_logo.png")).scaledToWidth(80)
+        lbl_logo_hsl = QLabel()
+        lbl_logo_hsl.setPixmap(pixmap_hsl)
+        lbl_logo_hsl.setAlignment(Qt.AlignVCenter)
+
+        # Logo thứ 2
+        pixmap_logo2 = QPixmap(resource_path("qrcode_with_logo.png")).scaledToWidth(80)
+        lbl_logo2 = QLabel()
+        lbl_logo2.setPixmap(pixmap_logo2)
+        lbl_logo2.setAlignment(Qt.AlignVCenter)
+
+        # Text
+        lbl_text = QLabel(
+            "📝 Lưu ý: Ảnh crop chính giữa và resize.<br>"
+            "📌 Output dùng cho <b>ARGB Happy Smart Light</b>, chuyên biệt cho <b>POI LED</b>.<br><br>"
+            "💬 Zalo: <a href='https://zalo.me/0784140494'>0784140494</a><br>"
+            "🌐 Website: <a href='https://happysmartlight.com/'>https://happysmartlight.com/</a>"
         )
-        footer.setTextFormat(Qt.RichText)
-        footer.setAlignment(Qt.AlignCenter)
-        footer.setWordWrap(True)
-        main.addWidget(footer)
+        lbl_text.setTextFormat(Qt.RichText)
+        lbl_text.setWordWrap(True)
+        lbl_text.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        lbl_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+        # Thêm các widget vào layout
+        footer_layout.addWidget(lbl_logo_hsl)
+        footer_layout.addWidget(lbl_logo2)
+        footer_layout.addWidget(lbl_text, stretch=1)
+
+        main.addWidget(footer_widget)
+
+        # ==== nút thoát ====
+        btn_quit = QPushButton("❌ Thoát")
+        btn_quit.clicked.connect(self.close)
+        main.addWidget(btn_quit)
+
 
     # ====================
     # Tắt LED ARGB
@@ -592,8 +623,9 @@ class BMPConverter(QWidget):
 # ====================
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setWindowIcon(QIcon("favicon.ico"))   # <== bắt buộc
+    icon_path = resource_path("favicon.ico")
+    app.setWindowIcon(QIcon(icon_path))   # Icon ứng dụng
     win = BMPConverter()
-    win.setWindowIcon(QIcon("favicon.ico"))   # nếu muốn
+    win.setWindowIcon(QIcon(icon_path))   # Icon cửa sổ (nếu muốn)
     win.show()
     sys.exit(app.exec())

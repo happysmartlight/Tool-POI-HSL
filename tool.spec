@@ -5,7 +5,7 @@ a = Analysis(
     ['tool.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('hsl_logo.png', '.'), ('favicon.ico', '.'), ('qrcode_with_logo.png', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -35,5 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['favicon.ico'],
+    icon=['icon.ico'],
 )
