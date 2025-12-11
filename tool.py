@@ -139,12 +139,11 @@ class BMPConverter(QWidget):
             )
             return
 
-        # chuẩn bị combobox
         self.combo_ip.clear()
-        self.combo_ip.addItem("Đang quét mDNS...")
-        QApplication.processEvents()  # cập nhật GUI
+        self.combo_ip.addItem("Đang quét ARGB...")
+        QApplication.processEvents()
 
-        found_ips = []
+        found_devices = {}  # ip -> name
 
         class WledListener:
             def add_service(self, zeroconf, type, name):
@@ -153,21 +152,19 @@ class BMPConverter(QWidget):
                     ip_bytes = info.addresses[0]
                     ip = ".".join(str(b) for b in ip_bytes)
 
-                    if ip not in found_ips:
-                        # gọi HTTP GET /json để kiểm tra "info" và "brand"
+                    if ip not in found_devices:
                         try:
                             r = requests.get(f"http://{ip}/json", timeout=0.25)
                             j = r.json()
-
                             if "info" in j and j["info"].get("brand") == "ARGB":
-                                found_ips.append(ip)
-                                print(f"[mDNS] Phát hiện ARGB HSL: {ip}")
+                                dev_name = j["info"].get("name", "Unnamed")
+                                found_devices[ip] = dev_name
+                                print(f"[mDNS] Phát hiện ARGB HSL: {ip} ({dev_name})")
                         except Exception as e:
                             print(f"[mDNS] Lỗi kiểm tra JSON từ {ip}: {e}")
 
             def remove_service(self, zeroconf, type, name):
                 pass
-
             def update_service(self, zeroconf, type, name):
                 pass
 
@@ -175,17 +172,18 @@ class BMPConverter(QWidget):
         listener = WledListener()
         browser = ServiceBrowser(zeroconf, "_wled._tcp.local.", listener)
 
-        # hàm nội bộ để kết thúc scan
         def finish_scan():
             zeroconf.close()
             self.combo_ip.clear()
-            if found_ips:
-                self.combo_ip.addItems(found_ips)
+            if found_devices:
+                for ip, dev_name in found_devices.items():
+                    # hiển thị Tên (IP)
+                    self.combo_ip.addItem(f"{dev_name} ({ip})", userData=ip)
             else:
                 self.combo_ip.addItem("Không tìm thấy mạch ARGB HSL")
 
-        # chờ 2 giây rồi kết thúc scan
         QTimer.singleShot(2000, finish_scan)
+
 
 
     # ====================
@@ -481,15 +479,16 @@ class BMPConverter(QWidget):
             if msg.clickedButton() == btn_open:
                 QDesktopServices.openUrl(QUrl.fromLocalFile(out_dir))
 
-
+    # ====================
+    # Gửi BMP đến ARGB
     def send_to_wled(self):
         if self.loaded_image is None:
             QMessageBox.warning(self, "Chưa có ảnh", "Vui lòng mở ảnh trước.")
             return
 
-        # Lấy IP từ combobox
-        ip = self.combo_ip.currentText()
-        if not ip or "Không tìm thấy" in ip or "Đang quét" in ip:
+        # Lấy IP từ userData của combobox (không lấy toàn bộ text hiển thị)
+        ip = self.combo_ip.currentData()
+        if not ip:
             QMessageBox.warning(self, "Chưa chọn mạch", "Vui lòng chọn mạch ARGB hợp lệ.")
             return
 
@@ -511,6 +510,7 @@ class BMPConverter(QWidget):
             with open(tmp_file.name, "rb") as f:
                 files = {"data": f}
                 r = requests.post(url, files=files, timeout=3)
+
             if r.status_code == 200:
                 QMessageBox.information(self, "Hoàn tất", f"Đã gửi BMP đến {ip} thành công!")
             else:
@@ -527,6 +527,7 @@ class BMPConverter(QWidget):
             QMessageBox.critical(self, "Lỗi", f"Không thể gửi BMP:\n{e}")
         finally:
             os.unlink(tmp_file.name)
+
 
 
 # ====================
