@@ -88,7 +88,7 @@ class BMPConverter(QWidget):
 
 
         btn_scan = QPushButton("🔍 Scan ARGB")
-        btn_scan.clicked.connect(self.scan_wled_mdns)
+        btn_scan.clicked.connect(self.scan_argb_mdns)
         ctl3.addWidget(btn_scan)
         # ctl3.addStretch(1)
 
@@ -129,7 +129,7 @@ class BMPConverter(QWidget):
     # ====================
     # Scan ARGB qua mDNS (không cần subnet)
     # ====================
-    def scan_wled_mdns(self):
+    def scan_argb_mdns(self):
         try:
             from zeroconf import Zeroconf, ServiceBrowser
         except ImportError:
