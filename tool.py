@@ -13,7 +13,20 @@ from PySide6.QtWidgets import *
 from PySide6.QtCore import *
 from PySide6.QtGui import *
 
-APP_VERSION = "v1.2 - 2025"
+# ====================
+# App info
+# Version update: v1.3 - June 2025
+# Changelog:
+# - Thêm nút cài đặt ARGB
+# - Cải tiến giao diện chọn số mắt LED
+# ====================
+# Các gói cài đặt phụ thuộc:
+# pip install Pillow PySide6 requests zeroconf
+# Build command:
+# cmd build app: pyinstaller --onefile --windowed --icon=icon.ico     --add-data "hsl_logo.png;."  --add-data "favicon.ico;."   --add-data "qrcode_with_logo.png;."     tool.py
+
+
+APP_VERSION = "v1.3 - 2025"
 APP_TITLE   = "Phần mềm chuyển đổi ảnh qua POI HSL " + APP_VERSION
 APP_COMPANY = "Happy Smart Light"
 
@@ -91,21 +104,26 @@ class BMPConverter(QWidget):
         ctl3.addWidget(self.combo_ip)
 
 
-        btn_scan = QPushButton("🔍 Scan ARGB")
+        btn_scan = QPushButton("🔍 Tim ARGB")
         btn_scan.clicked.connect(self.scan_argb_mdns)
         ctl3.addWidget(btn_scan)
         # ctl3.addStretch(1)
 
-        btn_send = QPushButton("📤 Gửi BMP đến ARGB")
+        btn_send = QPushButton("📤 Gửi dữ liệu đến ARGB")
         btn_send.clicked.connect(self.send_to_argb)
         ctl3.addWidget(btn_send)
+
+        # ----- Nút Setting -----
+        btn_settings = QPushButton("⚙️ Cài đặt ARGB")
+        ctl3.addWidget(btn_settings)
+        btn_settings.clicked.connect(self.settings_led)
 
         btn_off = QPushButton("💡 Tắt LED ARGB")
         ctl3.addWidget(btn_off)
         btn_off.clicked.connect(self.turn_off_led)
 
         # ==== label thông tin ====
-        self.lbl_info = QLabel("Chưa tải ảnh.")
+        self.lbl_info = QLabel("Chưa tải/chọn ảnh.")
         main.addWidget(self.lbl_info)
 
         # ==== vùng preview ====
@@ -114,7 +132,7 @@ class BMPConverter(QWidget):
         main.addWidget(frame, 1)
 
         frm_layout = QVBoxLayout(frame)
-        self.lbl_preview = QLabel("Chưa có ảnh.")
+        self.lbl_preview = QLabel("Chưa có ảnh xem trước khi POI được quay.")
         self.lbl_preview.setAlignment(Qt.AlignCenter)
         frm_layout.addWidget(self.lbl_preview)
 
@@ -138,8 +156,8 @@ class BMPConverter(QWidget):
 
         # Text
         lbl_text = QLabel(
-            "📝 Lưu ý: Ảnh crop chính giữa và resize.<br>"
-            "📌 Output dùng cho <b>ARGB Happy Smart Light</b>, chuyên biệt cho <b>POI LED</b>.<br><br>"
+            "📝 Lưu ý: Ảnh được crop chính giữa và resize theo kích thước thanh POI.<br>"
+            "📌 Dùng cho <b>ARGB Happy Smart Light</b>, chuyên biệt cho <b>POI LED</b>.<br><br>"
             "💬 Zalo: <a href='https://zalo.me/0784140494'>0784140494</a><br>"
             "🌐 Website: <a href='https://happysmartlight.com/'>https://happysmartlight.com/</a>"
         )
@@ -159,6 +177,17 @@ class BMPConverter(QWidget):
         btn_quit = QPushButton("❌ Thoát")
         btn_quit.clicked.connect(self.close)
         main.addWidget(btn_quit)
+
+    # ====================
+    # Mở trang cài đặt ARGB
+    def settings_led(self):
+        # Lấy IP từ combobox
+        ip = self.combo_ip.currentData()
+        if not ip:
+            QMessageBox.warning(self, "Lỗi", "Không có IP để mở trang Cài đặt.")
+            return
+
+        QDesktopServices.openUrl(QUrl(f"http://{ip}/settings/leds"))
 
 
     # ====================
@@ -321,12 +350,18 @@ class BMPConverter(QWidget):
         try:
             w = int(self.entry_width.text())
         except:
+            # Reset về 72 khi sai kiểu dữ liệu
+            self.entry_width.setText("72")
             self._warn_width("Giá trị không hợp lệ! Vui lòng nhập số.")
-            return None
+            self.entry_width.setStyleSheet("")
+            return 72
 
         if w < 15 or w > 72:
+            # Reset về 72 khi sai kiểu dữ liệu
+            self.entry_width.setText("72")
             self._warn_width("Giá trị phải nằm trong khoảng 15 đến 72 pixel.")
-            return None
+            self.entry_width.setStyleSheet("")
+            return 72
 
         # reset màu
         self.entry_width.setStyleSheet("")
