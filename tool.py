@@ -96,6 +96,10 @@ class BMPConverter(QWidget):
         btn_send.clicked.connect(self.send_to_wled)
         ctl3.addWidget(btn_send)
 
+        btn_off = QPushButton("💡 Tắt LED ARGB")
+        ctl3.addWidget(btn_off)
+        btn_off.clicked.connect(self.turn_off_led)
+
         # ==== label thông tin ====
         self.lbl_info = QLabel("Chưa tải ảnh.")
         main.addWidget(self.lbl_info)
@@ -125,6 +129,28 @@ class BMPConverter(QWidget):
         footer.setAlignment(Qt.AlignCenter)
         footer.setWordWrap(True)
         main.addWidget(footer)
+
+    # ====================
+    # Tắt LED ARGB
+    def turn_off_led(self):
+        ip = self.combo_ip.currentData()
+        if not ip:
+            QMessageBox.warning(self, "Chưa chọn mạch", "Vui lòng chọn mạch ARGB hợp lệ.")
+            return
+
+        try:
+            url_state = f"http://{ip}/json/state"
+            json_payload = {
+                "on": False  # Tắt toàn bộ LED
+            }
+            r = requests.post(url_state, json=json_payload, timeout=3)
+            if r.status_code == 200:
+                QMessageBox.information(self, "OK", "Đã tắt LED ARGB thành công!")
+            else:
+                QMessageBox.warning(self, "Lỗi", f"Tắt LED thất bại! HTTP {r.status_code}")
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi", f"Không thể tắt LED:\n{e}")
+
 
     # ====================
     # Scan ARGB qua mDNS (không cần subnet)
@@ -481,12 +507,14 @@ class BMPConverter(QWidget):
 
     # ====================
     # Gửi BMP đến ARGB
-    def send_to_wled(self):
+    # ====================
+    # Gửi BMP đến ARGB và cập nhật trạng thái
+    def send_to_argb(self):
         if self.loaded_image is None:
             QMessageBox.warning(self, "Chưa có ảnh", "Vui lòng mở ảnh trước.")
             return
 
-        # Lấy IP từ userData của combobox (không lấy toàn bộ text hiển thị)
+        # Lấy IP từ userData của combobox
         ip = self.combo_ip.currentData()
         if not ip:
             QMessageBox.warning(self, "Chưa chọn mạch", "Vui lòng chọn mạch ARGB hợp lệ.")
@@ -503,21 +531,49 @@ class BMPConverter(QWidget):
         im2.save(tmp_file.name, "BMP")
         tmp_file.close()
 
-        # Dùng requests để upload thay vì gọi curl ngoài
+        import os
+        output_name = os.path.basename(tmp_file.name)  # chỉ lấy tmpf2cwciv6.bmp
+
         try:
             import requests
-            url = f"http://{ip}/upload"
+
+            # --- Bước 1: Upload BMP ---
+            url_upload = f"http://{ip}/upload"
             with open(tmp_file.name, "rb") as f:
                 files = {"data": f}
-                r = requests.post(url, files=files, timeout=3)
+                r = requests.post(url_upload, files=files, timeout=5)
 
             if r.status_code == 200:
                 QMessageBox.information(self, "Hoàn tất", f"Đã gửi BMP đến {ip} thành công!")
+
+                # --- Bước 2: POST JSON cập nhật LED ---
+                url_state = f"http://{ip}/json/state"
+                json_payload = {
+                    "on": True,          # bật toàn bộ LED
+                    "bri": 100,          # độ sáng tổng thể
+                    "seg": [
+                        {
+                            "id": 0,
+                            "on": True,
+                            "bri": 60,               # độ sáng segment
+                            "n": f"/{output_name}",  # tên BMP vừa upload
+                            "fx": 48                 # hiệu ứng
+                        }
+                    ]
+                }
+                try:
+                    r2 = requests.post(url_state, json=json_payload, timeout=3)
+                    if r2.status_code == 200:
+                        print(f"[INFO] Segment 0 cập nhật thành công: {r2.json()}")
+                    else:
+                        print(f"[WARN] POST JSON thất bại HTTP {r2.status_code}")
+                except Exception as e2:
+                    print(f"[ERROR] Không thể cập nhật JSON: {e2}")
+
             else:
                 msg = QMessageBox(self)
                 msg.setWindowTitle("Lỗi")
                 msg.setText(f"Gửi không thành công! HTTP {r.status_code}")
-                # Thêm nút mở trang settings/sec
                 btn_open = msg.addButton("Mở mã PIN ARGB", QMessageBox.ActionRole)
                 msg.addButton("Đóng", QMessageBox.RejectRole)
                 msg.exec()
@@ -526,6 +582,7 @@ class BMPConverter(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Lỗi", f"Không thể gửi BMP:\n{e}")
         finally:
+            import os
             os.unlink(tmp_file.name)
 
 
