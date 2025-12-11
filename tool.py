@@ -15,7 +15,7 @@ from PySide6.QtGui import *
 
 # ====================
 # App info
-# Version update: v1.3 - June 2025
+# Version update: v1.3 - Dec 2025
 # Changelog:
 # - Thêm nút cài đặt ARGB
 # - Cải tiến giao diện chọn số mắt LED
