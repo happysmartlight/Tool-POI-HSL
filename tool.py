@@ -152,15 +152,24 @@ class BMPConverter(QWidget):
                 if info:
                     ip_bytes = info.addresses[0]
                     ip = ".".join(str(b) for b in ip_bytes)
+
                     if ip not in found_ips:
-                        found_ips.append(ip)
-                        print(f"[mDNS] Phát hiện ARGB HSL: {ip}")
+                        # gọi HTTP GET /json để kiểm tra "info" và "brand"
+                        try:
+                            r = requests.get(f"http://{ip}/json", timeout=0.25)
+                            j = r.json()
+
+                            if "info" in j and j["info"].get("brand") == "ARGB":
+                                found_ips.append(ip)
+                                print(f"[mDNS] Phát hiện ARGB HSL: {ip}")
+                        except Exception as e:
+                            print(f"[mDNS] Lỗi kiểm tra JSON từ {ip}: {e}")
 
             def remove_service(self, zeroconf, type, name):
                 pass
 
             def update_service(self, zeroconf, type, name):
-                pass  # tránh warning future
+                pass
 
         zeroconf = Zeroconf()
         listener = WledListener()
