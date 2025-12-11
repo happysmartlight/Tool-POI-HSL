@@ -5,6 +5,8 @@ import json
 import ipaddress
 from concurrent.futures import ThreadPoolExecutor
 import requests
+from zeroconf import ServiceBrowser, Zeroconf
+import threading
 
 from PIL import Image
 from PySide6.QtWidgets import *
@@ -86,7 +88,7 @@ class BMPConverter(QWidget):
 
 
         btn_scan = QPushButton("🔍 Scan ARGB")
-        btn_scan.clicked.connect(self.scan_wled)
+        btn_scan.clicked.connect(self.scan_wled_mdns)
         ctl3.addWidget(btn_scan)
         # ctl3.addStretch(1)
 
@@ -125,50 +127,61 @@ class BMPConverter(QWidget):
         main.addWidget(footer)
 
     # ====================
-    # Scan ARGB (nhanh, song song)
+    # Scan ARGB qua mDNS (không cần subnet)
     # ====================
-    def scan_wled(self):
-        # chuẩn bị combobox
-        self.combo_ip.clear()
-        self.combo_ip.addItem("Đang quét UDP...")
-
-        QApplication.processEvents()  # cập nhật GUI
-
-        # subnet mặc định, có thể sửa
-        subnet, ok = QInputDialog.getText(
-            self, "Subnet quét", "Nhập subnet (vd: 192.168.1.0/24):", text="192.168.1.0/24"
-        )
-        if not ok or not subnet:
-            self.combo_ip.clear()
-            self.combo_ip.addItem("Hủy quét")
+    def scan_wled_mdns(self):
+        try:
+            from zeroconf import Zeroconf, ServiceBrowser
+        except ImportError:
+            QMessageBox.warning(
+                self, "Thiếu thư viện",
+                "Bạn cần cài đặt zeroconf:\n\npip install zeroconf"
+            )
             return
 
-        ips = [str(ip) for ip in ipaddress.IPv4Network(subnet, strict=False)]
-        found = []
-
-        def check_ip(ip):
-            try:
-                url = f"http://{ip}/json"
-                r = requests.get(url, timeout=0.25)
-                j = r.json()
-                if "info" in j and j["info"].get("ver", "").startswith("2.0_HSL"):
-                    print(f"[DEBUG] Phát hiện ARGB HSL: {ip}")
-                    return ip
-            except:
-                return None
-
-        with ThreadPoolExecutor(max_workers=50) as ex:
-            for res in ex.map(check_ip, ips):
-                if res:
-                    found.append(res)
-
-        # cập nhật combobox GUI
+        # chuẩn bị combobox
         self.combo_ip.clear()
-        if found:
-            self.combo_ip.addItems(found)
-        else:
-            self.combo_ip.addItem("Không tìm thấy mạch ARGB HSL")
+        self.combo_ip.addItem("Đang quét mDNS...")
+        QApplication.processEvents()  # cập nhật GUI
 
+        found_ips = []
+
+        class WledListener:
+            def add_service(self, zeroconf, type, name):
+                info = zeroconf.get_service_info(type, name)
+                if info:
+                    ip_bytes = info.addresses[0]
+                    ip = ".".join(str(b) for b in ip_bytes)
+                    if ip not in found_ips:
+                        found_ips.append(ip)
+                        print(f"[mDNS] Phát hiện ARGB HSL: {ip}")
+
+            def remove_service(self, zeroconf, type, name):
+                pass
+
+            def update_service(self, zeroconf, type, name):
+                pass  # tránh warning future
+
+        zeroconf = Zeroconf()
+        listener = WledListener()
+        browser = ServiceBrowser(zeroconf, "_wled._tcp.local.", listener)
+
+        # hàm nội bộ để kết thúc scan
+        def finish_scan():
+            zeroconf.close()
+            self.combo_ip.clear()
+            if found_ips:
+                self.combo_ip.addItems(found_ips)
+            else:
+                self.combo_ip.addItem("Không tìm thấy mạch ARGB HSL")
+
+        # chờ 2 giây rồi kết thúc scan
+        QTimer.singleShot(2000, finish_scan)
+
+
+    # ====================
+    # Contact
+    # ====================
     def show_contact(self):
         text = (
             '<b>Zalo:</b> '
