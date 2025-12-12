@@ -49,6 +49,7 @@ class PixelPreview(QWidget):
         super().__init__()
         self.image = None
         self.grid = True  # bật/tắt lưới pixel
+        self.setAutoFillBackground(True)  # Cho phép Qt tự tô nền theo system palette
 
     def setImage(self, qimg: QImage):
         self.image = qimg
@@ -58,37 +59,40 @@ class PixelPreview(QWidget):
         """Xóa ảnh hiện tại"""
         self.image = None
         self.update()
-
+        
     def paintEvent(self, event):
         painter = QPainter(self)
+
+        # --- Không có ảnh: vẽ background theo palette hệ thống ---
+        if self.image is None:
+            # Lấy màu nền hệ thống
+            pal = self.palette()
+            bg = pal.color(QPalette.Window)
+            painter.fillRect(self.rect(), bg)
+
+            # Vẽ text hướng dẫn ở giữa
+            painter.setPen(pal.color(QPalette.WindowText))
+            painter.setFont(QFont("Arial", 12))
+
+            text = "Khu vực hiển thị ảnh xem trước khi quay Poi"
+            rect = self.rect()
+            painter.drawText(rect, Qt.AlignCenter, text)
+            return
+
+        # --- Có ảnh: vẽ ảnh pixel ---
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
         w = self.width()
         h = self.height()
 
-        if self.image is None:
-            # ===== Hiển thị thông báo khi chưa có ảnh =====
-            painter.fillRect(0, 0, w, h, QColor(30, 30, 30))  # nền xám tối
-            painter.setPen(QColor(200, 200, 200))  # màu chữ sáng
-            painter.setFont(self.font())
-            text = "Khu vực hiển thị ảnh xem trước khi quay Poi"
-            rect = painter.boundingRect(0, 0, w, h, Qt.AlignmentFlag.AlignCenter, text)
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
-            painter.end()
-            return
-
-        # ===== Vẽ ảnh =====
         img_w = self.image.width()
         img_h = self.image.height()
 
-        # kích thước mỗi pixel khi phóng to
         px = min(w // img_w, h // img_h)
 
-        # tính vị trí để ảnh được nằm giữa
         offset_x = (w - img_w * px) // 2
         offset_y = (h - img_h * px) // 2
 
-        # vẽ từng pixel
         for y in range(img_h):
             for x in range(img_w):
                 color = QColor(self.image.pixel(x, y))
@@ -100,9 +104,8 @@ class PixelPreview(QWidget):
                     color
                 )
 
-                # vẽ viền pixel (grid)
                 if self.grid and px >= 4:
-                    painter.setPen(QColor(40, 40, 40))  # màu viền
+                    painter.setPen(QColor(40, 40, 40))
                     painter.drawRect(
                         offset_x + x * px,
                         offset_y + y * px,
@@ -111,6 +114,7 @@ class PixelPreview(QWidget):
                     )
 
         painter.end()
+
 
 # ====================
 
@@ -207,32 +211,39 @@ class BMPConverter(QWidget):
 
         # ==== Nhóm ưu tiên: Pixel LED / Số lượng Pixel ==== 
         grp_pixel = QGroupBox("🔧 Cấu hình Pixel LED")
-        main.addWidget(grp_pixel)
-        layout_pixel = QHBoxLayout(grp_pixel)
+        layout_pixel = QVBoxLayout(grp_pixel)
 
-        layout_pixel.addWidget(QLabel("Pixel LEDs POI (15-72):"))
+        # --- Hàng nhập số pixel ---
+        row_pixel = QHBoxLayout()
+        row_pixel.addWidget(QLabel("Pixel LEDs POI (15-72):"))
+
         self.entry_width = QLineEdit("72")
         self.entry_width.setFixedWidth(80)
-        layout_pixel.addWidget(self.entry_width)
-        layout_pixel.addStretch(1)
+        row_pixel.addWidget(self.entry_width)
+        row_pixel.addStretch(1)
 
+        layout_pixel.addLayout(row_pixel)
+
+        # --- Ghi chú về chất lượng ảnh ---
+        note = QLabel(
+            "<i>● Số lượng pixel càng cao → hình ảnh hiển thị càng chi tiết và mượt.</i><br>"
+        )
+        note.setWordWrap(True)
+        palette = self.palette()
+        text_color = palette.color(QPalette.WindowText)
+        note.setStyleSheet(f"color: {text_color.name()}; font-size: 12px;")
+
+        layout_pixel.addWidget(note)
         # ==== Nhóm Ảnh / Batch (group lớn) ====
         grp_image = QGroupBox("🖼 Công cụ chuyển Ảnh")
-        main.addWidget(grp_image)
 
         layout_img = QHBoxLayout(grp_image)
-        # layout_img.setSpacing(20)
 
-        # =====================================
-        # 1) GROUP TRÁI: XỬ LÝ 1 ẢNH
-        # =====================================
+        # ======== GROUP TRÁI: XỬ LÝ 1 ẢNH ========
         grp_single = QGroupBox("📦 Xử lý 1 ảnh")
         layout_left = QVBoxLayout(grp_single)
-        layout_left.setAlignment(Qt.AlignTop)
 
-        # --- Hàng nút chọn ảnh + lưu ảnh ---
         row_buttons = QHBoxLayout()
-
         btn_open = QPushButton("📁 Chọn ảnh...")
         btn_open.clicked.connect(self.open_image)
         row_buttons.addWidget(btn_open)
@@ -242,16 +253,12 @@ class BMPConverter(QWidget):
         row_buttons.addWidget(btn_save)
 
         layout_left.addLayout(row_buttons)
-
-        # --- Label thông tin ảnh ---
         self.lbl_info = QLabel("Chưa tải/chọn ảnh.")
         layout_left.addWidget(self.lbl_info)
 
-        layout_img.addWidget(grp_single, stretch=2)
+        layout_img.addWidget(grp_single, stretch=1)
 
-        # =====================================
-        # 2) GROUP PHẢI: CHUYỂN NHIỀU ẢNH
-        # =====================================
+        # ======== GROUP PHẢI: BATCH ========
         grp_multi = QGroupBox("📦 Chuyển nhiều ảnh")
         layout_right = QVBoxLayout(grp_multi)
         layout_right.setAlignment(Qt.AlignTop)
@@ -260,7 +267,28 @@ class BMPConverter(QWidget):
         btn_multi.clicked.connect(self.convert_multiple)
         layout_right.addWidget(btn_multi)
 
+        # --- Ghi chú về batch tool ---
+        note_multi = QLabel(
+            "<i>● Sau khi chuyển đổi, ảnh sẽ được lưu vào thư mục bạn chọn.</i>"
+        )
+        note_multi.setWordWrap(True)
+        palette = self.palette()
+        text_color = palette.color(QPalette.WindowText)
+        note_multi.setStyleSheet(f"color: {text_color.name()}; font-size: 12px;")
+
+        layout_right.addWidget(note_multi)
+
         layout_img.addWidget(grp_multi, stretch=1)
+
+        # ============================================
+        # ==== ĐẶT 2 GROUP NẰM NGANG ====
+        # ============================================
+        top_row = QHBoxLayout()
+        top_row.addWidget(grp_pixel, stretch=1)
+        top_row.addWidget(grp_image, stretch=3)
+
+        main.addLayout(top_row)
+
 
 
         # ==== Nhóm ARGB / LED tách 2 nhóm nhỏ ==== 
@@ -878,6 +906,17 @@ class BMPConverter(QWidget):
         from PIL import Image
         import tempfile, os, requests
 
+        # 3️⃣ Lấy IP mạch
+        ip = self.combo_ip.currentData()
+        if not ip:
+            QMessageBox.warning(self, "Chưa chọn mạch", "Vui lòng chọn mạch ARGB hợp lệ.")
+            return
+
+        # 4️⃣ Lấy width target
+        w = self._get_target_width()
+        if not w:
+            return
+
         # 1️⃣ Chọn nhiều file ảnh
         file_paths, _ = QFileDialog.getOpenFileNames(
             self, "Chọn ảnh để gửi ARGB", "", "Images (*.png *.jpg *.bmp)"
@@ -890,17 +929,6 @@ class BMPConverter(QWidget):
             images = [Image.open(p) for p in file_paths]
         except Exception as e:
             QMessageBox.critical(self, "Lỗi", f"Không thể load ảnh: {e}")
-            return
-
-        # 3️⃣ Lấy IP mạch
-        ip = self.combo_ip.currentData()
-        if not ip:
-            QMessageBox.warning(self, "Chưa chọn mạch", "Vui lòng chọn mạch ARGB hợp lệ.")
-            return
-
-        # 4️⃣ Lấy width target
-        w = self._get_target_width()
-        if not w:
             return
 
         # 5️⃣ Gửi lần lượt từng ảnh
