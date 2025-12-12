@@ -99,6 +99,7 @@ class PixelIndexBar(QWidget):
     def __init__(self):
         super().__init__()
         self.count = 0
+        self.setMinimumHeight(40)
 
     def setCount(self, n):
         self.count = n
@@ -109,22 +110,48 @@ class PixelIndexBar(QWidget):
             return
 
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
 
         w = self.width()
         h = self.height()
-        cell = w / self.count
 
+        # === Style chung ===
+        painter.setPen(QPen(QColor(180, 180, 180), 2))
+        painter.setBrush(QColor(30, 30, 30))
+        painter.drawRoundedRect(5, 5, w-10, h-10, 8, 8)
+
+        # ==== Các mốc LED ====
+        led_start = 1
+        led_mid   = self.count // 2
+        led_end   = self.count
+
+        # ==== Chia đều chiều ngang cho 4 nhãn ====
+        sections = 4
+        x_positions = [
+            w * (0.5 / sections),   # MẠCH ARGB HSL
+            w * (1.5 / sections),   # LED 1
+            w * (2.5 / sections),   # LED MID
+            w * (3.5 / sections),   # LED END
+        ]
+        y = h // 2 + 5
+
+        # Font đẹp
         font = painter.font()
-        font.setPointSize(max(6, int(cell * 0.35)))
+        font.setPointSize(12)
+        font.setBold(True)
         painter.setFont(font)
+        painter.setPen(QColor("#FFFFFF"))
 
-        for i in range(self.count):
-            x = int(i * cell)
-            painter.drawText(
-                QRect(x, 0, int(cell), h),
-                Qt.AlignCenter,
-                str(i)
-            )
+        arrow = "➜"
+
+        # ==== Vẽ text ====
+        painter.drawText(int(x_positions[0] - 50), y, "|| MẠCH ARGB HSL ||")
+        painter.drawText(int(x_positions[1] - 20), y, f"LED {led_start} {arrow}")
+        painter.drawText(int(x_positions[2] - 30), y, f"{arrow} LED {led_mid} {arrow}")
+        painter.drawText(int(x_positions[3] - 20), y, f"{arrow} LED {led_end}")
+
+        painter.end()
+
 
 
 class BMPConverter(QWidget):
@@ -134,7 +161,7 @@ class BMPConverter(QWidget):
 
         self.setWindowTitle(APP_TITLE)
         self.setWindowIcon(QIcon("favicon.ico"))
-        self.resize(820, 650)  # tăng chiều cao để thêm combobox scan
+        self.resize(920, 750)  # tăng chiều cao để thêm combobox scan
 
         self.input_path = None
         self.loaded_image = None
@@ -217,9 +244,15 @@ class BMPConverter(QWidget):
         frame.setStyleSheet("border:1px solid gray;")
         main.addWidget(frame, 1)
 
+        #==== index bar ====
         frm_layout = QVBoxLayout(frame)
+        self.index_bar = PixelIndexBar()
+        self.index_bar.setFixedHeight(30)
+        frm_layout.addWidget(self.index_bar)
+
         self.lbl_preview = PixelPreview()
         frm_layout.addWidget(self.lbl_preview)
+
 
 
         # ==== footer ====
@@ -500,6 +533,8 @@ class BMPConverter(QWidget):
         im2 = self._convert_to_square_rgb(w, self.loaded_image)
         qimg = self._image_to_qpixmap(im2).toImage()
         self.lbl_preview.setImage(qimg)
+        self.index_bar.setCount(im2.width)
+
 
 
     def _image_to_qpixmap(self, im: Image.Image):
