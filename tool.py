@@ -40,6 +40,92 @@ def resource_path(relative_path):
 
     return os.path.join(base_path, relative_path)
 
+class PixelPreview(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.image = None
+        self.grid = True  # bật/tắt lưới pixel
+
+    def setImage(self, qimg: QImage):
+        self.image = qimg
+        self.update()
+
+    def paintEvent(self, event):
+        if self.image is None:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+
+        w = self.width()
+        h = self.height()
+
+        img_w = self.image.width()
+        img_h = self.image.height()
+
+        # kích thước mỗi pixel khi phóng to
+        px = min(w // img_w, h // img_h)
+
+        # tính vị trí để ảnh được nằm giữa
+        offset_x = (w - img_w * px) // 2
+        offset_y = (h - img_h * px) // 2
+
+        # vẽ từng pixel
+        for y in range(img_h):
+            for x in range(img_w):
+                color = QColor(self.image.pixel(x, y))
+                painter.fillRect(
+                    offset_x + x * px,
+                    offset_y + y * px,
+                    px,
+                    px,
+                    color
+                )
+
+                # vẽ viền pixel (grid)
+                if self.grid and px >= 4:
+                    painter.setPen(QColor(40, 40, 40))  # màu viền
+                    painter.drawRect(
+                        offset_x + x * px,
+                        offset_y + y * px,
+                        px,
+                        px
+                    )
+
+        painter.end()
+# ====================
+
+class PixelIndexBar(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.count = 0
+
+    def setCount(self, n):
+        self.count = n
+        self.update()
+
+    def paintEvent(self, event):
+        if self.count <= 0:
+            return
+
+        painter = QPainter(self)
+
+        w = self.width()
+        h = self.height()
+        cell = w / self.count
+
+        font = painter.font()
+        font.setPointSize(max(6, int(cell * 0.35)))
+        painter.setFont(font)
+
+        for i in range(self.count):
+            x = int(i * cell)
+            painter.drawText(
+                QRect(x, 0, int(cell), h),
+                Qt.AlignCenter,
+                str(i)
+            )
+
 
 class BMPConverter(QWidget):
 
@@ -132,9 +218,9 @@ class BMPConverter(QWidget):
         main.addWidget(frame, 1)
 
         frm_layout = QVBoxLayout(frame)
-        self.lbl_preview = QLabel("Chưa có ảnh xem trước khi POI được quay.")
-        self.lbl_preview.setAlignment(Qt.AlignCenter)
+        self.lbl_preview = PixelPreview()
         frm_layout.addWidget(self.lbl_preview)
+
 
         # ==== footer ====
         footer_widget = QWidget()
@@ -187,7 +273,7 @@ class BMPConverter(QWidget):
             QMessageBox.warning(self, "Lỗi", "Không có IP để mở trang Cài đặt.")
             return
 
-        QDesktopServices.openUrl(QUrl(f"http://{ip}/settings/leds"))
+        QDesktopServices.openUrl(QUrl(f"http://{ip}/"))
 
 
     # ====================
@@ -406,20 +492,15 @@ class BMPConverter(QWidget):
     def preview_convert(self):
         if self.loaded_image is None:
             return
+
         w = self._get_target_width()
         if not w:
             return
 
         im2 = self._convert_to_square_rgb(w, self.loaded_image)
-        qimg = self._image_to_qpixmap(im2)
-        self.lbl_preview.setPixmap(
-            qimg.scaled(
-                self.lbl_preview.width(),
-                self.lbl_preview.height(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-        )
+        qimg = self._image_to_qpixmap(im2).toImage()
+        self.lbl_preview.setImage(qimg)
+
 
     def _image_to_qpixmap(self, im: Image.Image):
         data = im.tobytes("raw", "RGB")
