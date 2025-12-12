@@ -741,7 +741,8 @@ class BMPConverter(QWidget):
                             "n": f"/{output_name}",  # tên BMP vừa upload
                             "fx": 48                 # hiệu ứng
                         }
-                    ]
+                    ],
+                    "psave": 1,  # lưu cấu hình ưu tiên
                 }
                 try:
                     r2 = requests.post(url_state, json=json_payload, timeout=3)
