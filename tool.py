@@ -3,6 +3,7 @@ import os
 import socket
 import json
 import ipaddress
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 import requests
 from zeroconf import ServiceBrowser, Zeroconf
@@ -820,77 +821,93 @@ class BMPConverter(QWidget):
             QMessageBox.warning(self, "Chưa có ảnh", "Vui lòng mở ảnh trước.")
             return
 
-        # Lấy IP từ userData của combobox
+        # Lấy IP từ combobox userData
         ip = self.combo_ip.currentData()
         if not ip:
             QMessageBox.warning(self, "Chưa chọn mạch", "Vui lòng chọn mạch ARGB hợp lệ.")
             return
 
-        # Lưu file tạm trước khi gửi
+        # Chuẩn bị file tạm
         w = self._get_target_width()
         if not w:
             return
 
         im2 = self._convert_to_square_rgb(w, self.loaded_image)
-        import tempfile
-        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".bmp")
-        im2.save(tmp_file.name, "BMP")
-        tmp_file.close()
 
-        import os
-        output_name = os.path.basename(tmp_file.name)  # chỉ lấy tmpf2cwciv6.bmp
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".bmp")
+        im2.save(tmp.name, "BMP")
+        tmp.close()
+
+        output_name = os.path.basename(tmp.name)
 
         try:
-            import requests
-
-            # --- Bước 1: Upload BMP ---
+            # ======================
+            # 1) UPLOAD FILE
+            # ======================
             url_upload = f"http://{ip}/upload"
-            with open(tmp_file.name, "rb") as f:
+            with open(tmp.name, "rb") as f:
                 files = {"data": f}
                 r = requests.post(url_upload, files=files, timeout=5)
 
-            if r.status_code == 200:
-                QMessageBox.information(self, "Hoàn tất", f"Đã gửi BMP đến {ip} thành công!")
-
-                # --- Bước 2: POST JSON cập nhật LED ---
-                url_state = f"http://{ip}/json/state"
-                json_payload = {
-                    "on": True,          # bật toàn bộ LED
-                    "bri": 100,          # độ sáng tổng thể
-                    "seg": [
-                        {
-                            "id": 0,
-                            "on": True,
-                            "bri": 60,               # độ sáng segment
-                            "n": f"/{output_name}",  # tên BMP vừa upload
-                            "fx": 48                 # hiệu ứng
-                        }
-                    ],
-                    "psave": 1,  # lưu cấu hình ưu tiên
-                }
-                try:
-                    r2 = requests.post(url_state, json=json_payload, timeout=3)
-                    if r2.status_code == 200:
-                        print(f"[INFO] Segment 0 cập nhật thành công: {r2.json()}")
-                    else:
-                        print(f"[WARN] POST JSON thất bại HTTP {r2.status_code}")
-                except Exception as e2:
-                    print(f"[ERROR] Không thể cập nhật JSON: {e2}")
-
-            else:
+            # ------------------------
+            # XỬ LÝ LỖI HTTP
+            # ------------------------
+            if r.status_code == 401:
                 msg = QMessageBox(self)
-                msg.setWindowTitle("Lỗi")
-                msg.setText(f"Gửi không thành công! HTTP {r.status_code}")
-                btn_open = msg.addButton("Mở mã PIN ARGB", QMessageBox.ActionRole)
-                msg.addButton("Đóng", QMessageBox.RejectRole)
+                msg.setWindowTitle("Thiết bị đang bị khóa (401)")
+                msg.setText("Thiết bị yêu cầu mã PIN để truy cập.\nBạn muốn làm gì?")
+                btn_open = msg.addButton("Mở trang PIN", QMessageBox.ActionRole)
+                btn_retry = msg.addButton("Gửi lại", QMessageBox.AcceptRole)
+                msg.addButton("Hủy", QMessageBox.RejectRole)
                 msg.exec()
+
                 if msg.clickedButton() == btn_open:
                     QDesktopServices.openUrl(QUrl(f"http://{ip}/settings/sec"))
+                    return
+                elif msg.clickedButton() == btn_retry:
+                    self.send_to_argb()  # Gửi lại
+                    return
+                else:
+                    return
+
+            elif r.status_code != 200:
+                QMessageBox.warning(
+                    self, 
+                    "Lỗi Upload",
+                    f"Upload không thành công!\nHTTP {r.status_code}"
+                )
+                return
+
+            QMessageBox.information(self, "Hoàn tất", f"Đã gửi BMP đến {ip} thành công!")
+
+            # ======================
+            # 2) POST JSON cấu hình LED
+            # ======================
+            url_state = f"http://{ip}/json/state"
+            json_payload = {
+                "on": True,
+                "bri": 100,
+                "seg": [
+                    {
+                        "id": 0,
+                        "on": True,
+                        "bri": 60,
+                        "n": f"/{output_name}",
+                        "fx": 48
+                    }
+                ],
+                "psave": 1
+            }
+
+            r2 = requests.post(url_state, json=json_payload, timeout=3)
+            if r2.status_code != 200:
+                print(f"[WARN] POST JSON thất bại HTTP {r2.status_code}")
+
         except Exception as e:
             QMessageBox.critical(self, "Lỗi", f"Không thể gửi BMP:\n{e}")
+
         finally:
-            import os
-            os.unlink(tmp_file.name)
+            os.unlink(tmp.name)
 
 
     # ====================
