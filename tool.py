@@ -8,6 +8,9 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 from zeroconf import ServiceBrowser, Zeroconf
 import threading
+# Shortcut: nhấn F1 bằng bàn phím sẽ gọi fn1_run_playlist (khi cửa sổ có focus)
+from PySide6.QtGui import QKeySequence
+from PySide6.QtCore import Qt
 
 from PIL import Image
 from PySide6.QtWidgets import *
@@ -353,17 +356,88 @@ class BMPConverter(QWidget):
 
         # ==== vùng preview ====
         frame = QFrame()
-        frame.setStyleSheet("border:1px solid gray;")
         main.addWidget(frame, 1)
+        
+        # ==== CHIA FRAME THÀNH 2 VÙNG ====
+        layout_main = QHBoxLayout(frame)
+        layout_main.setContentsMargins(0, 0, 0, 0)
+        layout_main.setSpacing(10)
 
-        #==== index bar ====
-        frm_layout = QVBoxLayout(frame)
+        # ========== VÙNG TRÁI (cột nhỏ chứa nút) ==========
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(5, 5, 5, 5)
+        left_layout.setSpacing(8)
+
+
+        # Các nút đồng bộ giao diện
+        btn_load = QPushButton("🔄 Làm mới preview")
+        btn_load.clicked.connect(lambda: (
+            self.lbl_preview.setImage(None),
+            self.index_bar.setCount(0),
+            setattr(self, "loaded_image", None)         # xoá ảnh gốc → send_to_argb không gửi được nữa
+        ))
+
+
+        btn_save = QPushButton("💾 Lưu BMP từ preview")
+        btn_save.clicked.connect(self.save_as_bmp)
+
+        btn_refresh = QPushButton("📤 Gửi ảnh đang xem")
+        btn_refresh.clicked.connect(self.send_to_argb)
+
+        left_layout.addWidget(btn_load)
+        left_layout.addWidget(btn_save)
+        left_layout.addWidget(btn_refresh)
+
+        # ====== Nhóm nút chức năng FN1 → FN10 ======
+        lbl_fn = QLabel("Phím chức năng nhanh:")
+        lbl_fn.setWordWrap(True)   # 👈 giú
+        left_layout.addWidget(lbl_fn)
+
+        for i in range(1, 11):
+            btn = QPushButton(f"FN{i}  (F{i})")
+            btn.setMinimumWidth(150)
+
+            if i == 1:
+                btn = QPushButton(f"Chạy tất cả Presets (F{i})")
+                btn.clicked.connect(self.fn1_run_playlist)
+            elif i == 2:
+                btn = QPushButton(f"Xóa tất cả Presets (F{i})")
+                btn.clicked.connect(self.fn2_clear_presets)
+            else:
+                btn.clicked.connect(lambda _, x=i: self.fn_placeholder(x))
+
+            left_layout.addWidget(btn)
+
+
+        left_layout.addStretch()
+        # ==== Thiết lập phím tắt cho FN1 và FN2 ====
+        self.shortcut_f1 = QShortcut(QKeySequence(Qt.Key_F1), self)
+        self.shortcut_f1.activated.connect(self.fn1_run_playlist)
+        self.shortcut_f2 = QShortcut(QKeySequence(Qt.Key_F2), self)
+        self.shortcut_f2.activated.connect(self.fn2_clear_presets)
+
+
+        left_panel.setFixedWidth(180)
+        layout_main.addWidget(left_panel)
+
+        # ========== VÙNG PHẢI (INDEX BAR + PREVIEW) ==========
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(6)
+
+        # Index bar
         self.index_bar = PixelIndexBar()
         self.index_bar.setFixedHeight(30)
-        frm_layout.addWidget(self.index_bar)
+        right_layout.addWidget(self.index_bar)
 
+        # Preview
         self.lbl_preview = PixelPreview()
-        frm_layout.addWidget(self.lbl_preview)
+        right_layout.addWidget(self.lbl_preview)
+
+        # Thêm panel phải vào layout (chiếm toàn bộ phần còn lại)
+        layout_main.addWidget(right_panel, 1)
 
 
 
@@ -410,15 +484,38 @@ class BMPConverter(QWidget):
         main.addWidget(btn_quit)
 
     # ====================
-    # Mở trang cài đặt ARGB
+    # Kiểm tra mạch ARGB online
+    def _is_device_online(self, ip):
+        """Ping nhanh bằng cách GET /json (ARGB luôn trả về JSON)."""
+        try:
+            r = requests.get(f"http://{ip}/json", timeout=1)
+            return r.status_code == 200
+        except:
+            return False
+
+
+    # ====================
+    # Mở trang cài đặt ARGB (KIỂM TRA ONLINE TRƯỚC)
+    # ====================
     def settings_led(self):
-        # Lấy IP từ combobox
         ip = self.combo_ip.currentData()
         if not ip:
             QMessageBox.warning(self, "Lỗi", "Không có IP để mở trang Cài đặt.")
             return
 
+        # ⭐ Kiểm tra thiết bị còn online không
+        if not self._is_device_online(ip):
+            QMessageBox.critical(
+                self,
+                "Không kết nối",
+                f"Không thể truy cập thiết bị {ip}.\n"
+                "Thiết bị có thể đã tắt nguồn hoặc mất WiFi."
+            )
+            return
+
+        # ⭐ Nếu online → mở trang cấu hình
         QDesktopServices.openUrl(QUrl(f"http://{ip}/"))
+
 
     # ====================
     # Đồng bộ POI (chưa implement)
@@ -436,25 +533,327 @@ class BMPConverter(QWidget):
         )
 
     # ====================
-    # Tắt LED ARGB
+    # FN1: Kiểm tra IP → đọc preset → popup → nhập thời gian → chạy playlist
+    # ====================
+    def fn1_run_playlist(self):
+        ip = self.combo_ip.currentData()
+        if not ip:
+            QMessageBox.warning(self, "Lỗi", "Chưa chọn mạch ARGB trong danh sách!")
+            return
+
+        # 1️⃣ Kiểm tra online
+        if not self._is_device_online(ip):
+            QMessageBox.critical(self, "Không online", f"Mạch ARGB {ip} không phản hồi!")
+            return
+
+        # 2️⃣ Tải presets.json
+        try:
+            r = requests.get(f"http://{ip}/presets.json", timeout=2)
+            presets = r.json()
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi", f"Không đọc được presets.json:\n{e}")
+            return
+
+        # 3️⃣ Lọc preset hợp lệ (ID >= 1)
+        valid = []
+        for k, v in presets.items():
+            if k.isdigit() and int(k) >= 1 and isinstance(v, dict) and len(v) > 0:
+                name = v.get("n", f"Preset {k}")
+                valid.append((int(k), name))
+
+        valid.sort(key=lambda x: x[0])
+
+        if not valid:
+            QMessageBox.information(self, "Không có preset", "Thiết bị không có preset hợp lệ!")
+            return
+
+        # 4️⃣ Popup danh sách preset
+        msg = f"Số preset hợp lệ: <b>{len(valid)}</b><br><br>"
+        for pid, name in valid:
+            msg += f"ID {pid}: {name}<br>"
+
+        QMessageBox.information(self, "Danh sách preset", msg)
+
+        # ⭐ 5️⃣ Popup nhập số giây chuyển preset
+        seconds, ok = QInputDialog.getInt(
+            self,
+            "Thời gian chạy mỗi preset",
+            "Nhập số giây cho mỗi preset:",
+            5,      # default
+            1,      # min
+            3600,   # max
+            1       # step
+        )
+
+        if not ok:
+            return  # Người dùng bấm Cancel
+
+
+        # ⭐ Convert giây → dur WLED (1s = 10 đơn vị)
+        dur_value = seconds * 10  
+
+        # 6️⃣ Chuẩn bị playlist
+        preset_ids = [pid for pid, _ in valid]
+        dur_list   = [dur_value] * len(preset_ids)
+
+        payload = {
+            "on": True,
+            "playlist": {
+                "ps": preset_ids,
+                "dur": dur_list,
+                "repeat": 0
+            }
+        }
+
+        # 7️⃣ Gửi playlist
+        try:
+            url = f"http://{ip}/json/state"
+            r = requests.post(url, json=payload, timeout=2)
+
+            if r.status_code == 200:
+                QMessageBox.information(
+                    self,
+                    "Thành công",
+                    f"Playlist đã bắt đầu chạy!\n"
+                    f"Mỗi preset chạy {seconds} giây."
+                )
+            else:
+                QMessageBox.critical(self, "Lỗi", f"Gửi playlist thất bại!\nHTTP {r.status_code}")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi", f"Không gửi được playlist:\n{e}")
+
+
+    # ====================
+    # FN2: Xóa Preset + Xóa file BMP trong bộ nhớ WLED
+    # ====================
+    def fn2_clear_presets(self):
+        ip = self.combo_ip.currentData()
+        if not ip:
+            QMessageBox.warning(self, "Lỗi", "Chưa chọn mạch ARGB hợp lệ.")
+            return
+
+        # -----------------------------
+        # XÁC MINH LẦN 1
+        # -----------------------------
+        confirm_1 = QMessageBox.question(
+            self,
+            "Xác nhận lần 1",
+            "⚠️ Bạn sắp XÓA TẤT CẢ PRESET (Preset 1 → N) trên thiết bị!\n\n"
+            "Hành động này KHÔNG THỂ hoàn tác.\n"
+            "Bạn có chắc muốn tiếp tục không?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if confirm_1 != QMessageBox.Yes:
+            return
+
+        # -----------------------------
+        # XÁC MINH LẦN 2
+        # -----------------------------
+        confirm_2 = QMessageBox.question(
+            self,
+            "Xác nhận lần 2",
+            "🚨 CẢNH BÁO CUỐI CÙNG!\nBạn thực sự muốn xóa TOÀN BỘ PRESET không?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if confirm_2 != QMessageBox.Yes:
+            return
+
+        # 1️⃣ Kiểm tra online
+        if not self._is_device_online(ip):
+            QMessageBox.critical(self, "Không online", f"Mạch ARGB {ip} không phản hồi!")
+            return
+
+        # 2️⃣ Lấy danh sách preset
+        try:
+            r = requests.get(f"http://{ip}/presets.json", timeout=2)
+            presets = r.json()
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi", f"Không đọc được presets.json:\n{e}")
+            return
+
+        # Lấy preset hợp lệ ID >= 1
+        preset_ids = [int(k) for k in presets.keys() if k.isdigit() and int(k) >= 1]
+        preset_ids.sort()
+
+        if not preset_ids:
+            QMessageBox.information(self, "Không có preset", "Thiết bị không có preset để xóa.")
+            return
+
+        # ===============================================================
+        # ⭐ 3️⃣ ĐƯA THIẾT BỊ VỀ TRẠNG THÁI AN TOÀN
+        # ===============================================================
+        try:
+            requests.post(f"http://{ip}/json/state", json={"ps": 0}, timeout=2)
+            requests.post(f"http://{ip}/json/state", json={"on": False}, timeout=2)
+        except:
+            QMessageBox.critical(
+                self,
+                "Lỗi",
+                "Không thể đưa thiết bị về trạng thái an toàn (preset 0 + tắt LED)."
+            )
+            return
+
+        # ===============================================================
+        # ⭐ 4️⃣ XÓA PRESET: { "pdel": ID }
+        # ===============================================================
+        failed = []
+
+        for pid in preset_ids:
+            try:
+                r = requests.post(
+                    f"http://{ip}/json/state",
+                    json={"pdel": pid},
+                    timeout=2
+                )
+                if r.status_code != 200:
+                    failed.append(pid)
+            except:
+                failed.append(pid)
+
+        # 5️⃣ Báo cáo preset
+        if failed:
+            QMessageBox.warning(
+                self,
+                "Xóa chưa hoàn tất",
+                "Một số preset không xóa được:\n" + ", ".join(map(str, failed))
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Preset đã xóa",
+                f"🎉 Đã xóa {len(preset_ids)} preset thành công!"
+            )
+
+        # ===============================================================
+        # ⭐ 6️⃣ HỎI NGƯỜI DÙNG CÓ MUỐN XÓA FILE BMP KHÔNG?
+        # ===============================================================
+        confirm_bmp = QMessageBox.question(
+            self,
+            "Xóa file ảnh BMP?",
+            "Bạn có muốn xóa toàn bộ file ảnh (*.bmp) trong bộ nhớ thiết bị không?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+
+        if confirm_bmp != QMessageBox.Yes:
+            return
+
+        # ===============================================================
+        # ⭐ 7️⃣ LẤY DANH SÁCH FILE CHUẨN /edit?list (trả về LIST)
+        # ===============================================================
+        try:
+            r = requests.get(f"http://{ip}/edit?list", timeout=3)
+            if r.status_code != 200:
+                QMessageBox.critical(self, "Lỗi", f"Không lấy được danh sách file! HTTP {r.status_code}")
+                return
+
+            files = r.json()
+            if not isinstance(files, list):
+                QMessageBox.critical(self, "Lỗi", "Phản hồi không đúng dạng list!")
+                return
+
+            # Lọc file *.bmp
+            bmp_files = [
+                f["name"]
+                for f in files
+                if isinstance(f, dict)
+                and "name" in f
+                and isinstance(f["name"], str)
+                and f["name"].lower().endswith(".bmp")
+            ]
+
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi", f"Không đọc danh sách file:\n{e}")
+            return
+
+        if not bmp_files:
+            QMessageBox.information(self, "Không có file BMP", "Thiết bị không có file ảnh BMP để xóa.")
+            return
+
+        # ===============================================================
+        # ⭐ 8️⃣ XÓA FILE BMP BẰNG func=delete
+        # ===============================================================
+        failed_bmp = []
+
+        for filename in bmp_files:
+            try:
+                rr = requests.get(
+                    f"http://{ip}/edit",
+                    params={"func": "delete", "path": filename},
+                    timeout=3
+                )
+                if rr.status_code != 200:
+                    failed_bmp.append(filename)
+            except:
+                failed_bmp.append(filename)
+
+        # ===============================================================
+        # ⭐ 9️⃣ Báo cáo kết quả
+        # ===============================================================
+        if failed_bmp:
+            QMessageBox.warning(
+                self,
+                "Xóa ảnh chưa hoàn tất",
+                "Một số file BMP không xóa được:\n" + "\n".join(failed_bmp)
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Hoàn tất",
+                f"🎉 Đã xóa toàn bộ {len(bmp_files)} file BMP thành công!"
+            )
+
+    # ====================
+    # Chức năng FN placeholder
+    def fn_placeholder(self, index):
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.information(
+            self,
+            f"FN{index}",
+            f"Chức năng FN{index} đang được phát triển…"
+        )
+
+    # ====================
+    # Tắt LED ARGB (có kiểm tra ONLINE trước)
+    # ====================
     def turn_off_led(self):
         ip = self.combo_ip.currentData()
         if not ip:
             QMessageBox.warning(self, "Chưa chọn mạch", "Vui lòng chọn mạch ARGB hợp lệ.")
             return
 
+        # ⭐ KIỂM TRA ONLINE TRƯỚC
+        if not self._is_device_online(ip):
+            QMessageBox.critical(
+                self,
+                "Không kết nối",
+                f"Không thể tắt LED vì thiết bị {ip} không phản hồi.\n"
+                "Thiết bị có thể đã tắt nguồn hoặc mất WiFi."
+            )
+            return
+
+        # ⭐ THIẾT BỊ ONLINE → gửi lệnh tắt
         try:
             url_state = f"http://{ip}/json/state"
-            json_payload = {
-                "on": False  # Tắt toàn bộ LED
-            }
+            json_payload = {"on": False}
+
             r = requests.post(url_state, json=json_payload, timeout=3)
+
             if r.status_code == 200:
                 QMessageBox.information(self, "OK", "Đã tắt LED ARGB thành công!")
             else:
-                QMessageBox.warning(self, "Lỗi", f"Tắt LED thất bại! HTTP {r.status_code}")
+                QMessageBox.warning(
+                    self,
+                    "Lỗi",
+                    f"Tắt LED thất bại!\nHTTP {r.status_code}"
+                )
+
         except Exception as e:
-            QMessageBox.critical(self, "Lỗi", f"Không thể tắt LED:\n{e}")
+            QMessageBox.critical(
+                self,
+                "Lỗi",
+                f"Không thể gửi lệnh tắt LED:\n{e}"
+            )
 
 
     # ====================
@@ -813,8 +1212,6 @@ class BMPConverter(QWidget):
                 QDesktopServices.openUrl(QUrl.fromLocalFile(out_dir))
 
     # ====================
-    # Gửi BMP đến ARGB
-    # ====================
     # Gửi BMP đến ARGB và cập nhật trạng thái
     def send_to_argb(self):
         if self.loaded_image is None:
@@ -825,6 +1222,15 @@ class BMPConverter(QWidget):
         ip = self.combo_ip.currentData()
         if not ip:
             QMessageBox.warning(self, "Chưa chọn mạch", "Vui lòng chọn mạch ARGB hợp lệ.")
+            return
+
+        # ⭐ KIỂM TRA KẾT NỐI TRƯỚC: TRÁNH CONNECT TIMEOUT
+        if not self._is_device_online(ip):
+            QMessageBox.critical(
+                self, 
+                "Thiết bị không online",
+                f"Không thể kết nối đến {ip}.\nThiết bị có thể đã tắt nguồn hoặc mất WiFi."
+            )
             return
 
         # Chuẩn bị file tạm
@@ -842,43 +1248,73 @@ class BMPConverter(QWidget):
 
         try:
             # ======================
-            # 1) UPLOAD FILE
+            # 1) UPLOAD FILE — CÓ VÒNG LẶP XỬ LÝ 401
             # ======================
-            url_upload = f"http://{ip}/upload"
-            with open(tmp.name, "rb") as f:
-                files = {"data": f}
-                r = requests.post(url_upload, files=files, timeout=5)
-
-            # ------------------------
-            # XỬ LÝ LỖI HTTP
-            # ------------------------
-            if r.status_code == 401:
-                msg = QMessageBox(self)
-                msg.setWindowTitle("Thiết bị đang bị khóa (401)")
-                msg.setText("Thiết bị yêu cầu mã PIN để truy cập.\nBạn muốn làm gì?")
-                btn_open = msg.addButton("Mở trang PIN", QMessageBox.ActionRole)
-                btn_retry = msg.addButton("Gửi lại", QMessageBox.AcceptRole)
-                msg.addButton("Hủy", QMessageBox.RejectRole)
-                msg.exec()
-
-                if msg.clickedButton() == btn_open:
-                    QDesktopServices.openUrl(QUrl(f"http://{ip}/settings/sec"))
-                    return
-                elif msg.clickedButton() == btn_retry:
-                    self.send_to_argb()  # Gửi lại
-                    return
-                else:
+            while True:
+                # Trước mỗi lần retry 401 — kiểm tra thiết bị còn sống không
+                if not self._is_device_online(ip):
+                    QMessageBox.critical(
+                        self,
+                        "Mất kết nối",
+                        f"Thiết bị {ip} đã mất kết nối trong khi upload.\n"
+                        "Vui lòng kiểm tra nguồn pin hoặc WiFi."
+                    )
                     return
 
-            elif r.status_code != 200:
-                QMessageBox.warning(
-                    self, 
-                    "Lỗi Upload",
-                    f"Upload không thành công!\nHTTP {r.status_code}"
-                )
-                return
+                url_upload = f"http://{ip}/upload"
 
-            QMessageBox.information(self, "Hoàn tất", f"Đã gửi BMP đến {ip} thành công!")
+                with open(tmp.name, "rb") as f:
+                    files = {"data": f}
+                    try:
+                        r = requests.post(url_upload, files=files, timeout=5)
+                    except Exception:
+                        QMessageBox.critical(
+                            self,
+                            "Lỗi Upload",
+                            "Không thể upload file (Timeout / thiết bị không phản hồi)."
+                        )
+                        return
+
+                # -----------------------------
+                # Lỗi 401 → yêu cầu PIN
+                # -----------------------------
+                if r.status_code == 401:
+                    msg = QMessageBox(self)
+                    msg.setWindowTitle("Thiết bị đang bị khóa (401)")
+                    msg.setText("Thiết bị yêu cầu mã PIN để truy cập.\nBạn muốn làm gì?")
+
+                    btn_open = msg.addButton("Mở trang PIN", QMessageBox.ActionRole)
+                    btn_retry = msg.addButton("Gửi lại", QMessageBox.AcceptRole)
+                    btn_cancel = msg.addButton("Hủy", QMessageBox.RejectRole)
+                    msg.exec()
+
+                    clicked = msg.clickedButton()
+
+                    if clicked == btn_open:
+                        QDesktopServices.openUrl(QUrl(f"http://{ip}/settings/sec"))
+                        # ⭐ KHÔNG RETURN → tiếp tục hiện popup lại / retry
+                        continue  
+
+                    elif clicked == btn_retry:
+                        # ⭐ Thử lại ngay
+                        continue
+                
+                    else:
+                        return
+
+                # -----------------------------
+                # Lỗi HTTP khác ≠ 200
+                # -----------------------------
+                elif r.status_code != 200:
+                    QMessageBox.warning(
+                        self, 
+                        "Lỗi Upload",
+                        f"Upload không thành công!\nHTTP {r.status_code}"
+                    )
+                    return
+
+                # Upload thành công → break
+                break
 
             # ======================
             # 2) POST JSON cấu hình LED
@@ -899,15 +1335,26 @@ class BMPConverter(QWidget):
                 "psave": 1
             }
 
-            r2 = requests.post(url_state, json=json_payload, timeout=3)
-            if r2.status_code != 200:
-                print(f"[WARN] POST JSON thất bại HTTP {r2.status_code}")
+            try:
+                r2 = requests.post(url_state, json=json_payload, timeout=3)
+                if r2.status_code != 200:
+                    print(f"[WARN] POST JSON thất bại HTTP {r2.status_code}")
+            except Exception:
+                QMessageBox.critical(
+                    self,
+                    "Lỗi JSON API",
+                    "Không thể gửi lệnh cấu hình LED.\nThiết bị có thể đã mất kết nối."
+                )
+                return
+
+            QMessageBox.information(self, "Hoàn tất", f"Đã gửi BMP đến {ip} thành công!")
 
         except Exception as e:
             QMessageBox.critical(self, "Lỗi", f"Không thể gửi BMP:\n{e}")
 
         finally:
             os.unlink(tmp.name)
+
 
 
     # ====================
