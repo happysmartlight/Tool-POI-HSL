@@ -19,6 +19,10 @@ from PySide6.QtGui import *
 # Changelog:
 # - Thêm nút cài đặt ARGB
 # - Cải tiến giao diện chọn số mắt LED
+# Version update: v1.4 - Dec 2025
+# Changelog:
+# - Thêm tính năng gửi nhiều ảnh đến ARGB với preset tăng dần
+# - Sửa lỗi nhỏ giao diện nhìn rỏ hơn
 # ====================
 # Các gói cài đặt phụ thuộc:
 # pip install Pillow PySide6 requests zeroconf
@@ -26,7 +30,7 @@ from PySide6.QtGui import *
 # cmd build app: pyinstaller --onefile --windowed --icon=icon.ico     --add-data "hsl_logo.png;."  --add-data "favicon.ico;."   --add-data "qrcode_with_logo.png;."     tool.py
 
 
-APP_VERSION = "v1.3 - 2025"
+APP_VERSION = "v1.4 - 2025"
 APP_TITLE   = "Phần mềm chuyển đổi ảnh qua POI HSL " + APP_VERSION
 APP_COMPANY = "Happy Smart Light"
 
@@ -50,16 +54,30 @@ class PixelPreview(QWidget):
         self.image = qimg
         self.update()
 
-    def paintEvent(self, event):
-        if self.image is None:
-            return
+    def clear(self):
+        """Xóa ảnh hiện tại"""
+        self.image = None
+        self.update()
 
+    def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
         w = self.width()
         h = self.height()
 
+        if self.image is None:
+            # ===== Hiển thị thông báo khi chưa có ảnh =====
+            painter.fillRect(0, 0, w, h, QColor(30, 30, 30))  # nền xám tối
+            painter.setPen(QColor(200, 200, 200))  # màu chữ sáng
+            painter.setFont(self.font())
+            text = "Khu vực hiển thị ảnh xem trước khi quay Poi"
+            rect = painter.boundingRect(0, 0, w, h, Qt.AlignmentFlag.AlignCenter, text)
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+            painter.end()
+            return
+
+        # ===== Vẽ ảnh =====
         img_w = self.image.width()
         img_h = self.image.height()
 
@@ -93,6 +111,7 @@ class PixelPreview(QWidget):
                     )
 
         painter.end()
+
 # ====================
 
 class PixelIndexBar(QWidget):
@@ -161,8 +180,21 @@ class BMPConverter(QWidget):
 
         self.setWindowTitle(APP_TITLE)
         self.setWindowIcon(QIcon("favicon.ico"))
-        self.resize(920, 750)  # tăng chiều cao để thêm combobox scan
 
+        screen = QGuiApplication.primaryScreen().availableGeometry()
+        screen_width = screen.width()
+        screen_height = screen.height()
+
+        # Resize theo tỉ lệ
+        win_w = int(screen_width * 0.60)
+        win_h = int(screen_height * 0.90)
+        self.resize(win_w, win_h)
+
+        # Căn giữa màn hình
+        geo = self.frameGeometry()
+        geo.moveCenter(screen.center())
+        self.move(geo.topLeft())
+        # ==== biến lưu trữ ====
         self.input_path = None
         self.loaded_image = None
         self.preview_qpix = None
@@ -173,71 +205,122 @@ class BMPConverter(QWidget):
         # ==== menu ====
         self._make_menu()
 
-        # ==== controls chính ====
-        ctl = QHBoxLayout()
-        main.addLayout(ctl)
+        # ==== Nhóm ưu tiên: Pixel LED / Số lượng Pixel ==== 
+        grp_pixel = QGroupBox("🔧 Cấu hình Pixel LED")
+        main.addWidget(grp_pixel)
+        layout_pixel = QHBoxLayout(grp_pixel)
+
+        layout_pixel.addWidget(QLabel("Pixel LEDs POI (15-72):"))
+        self.entry_width = QLineEdit("72")
+        self.entry_width.setFixedWidth(80)
+        layout_pixel.addWidget(self.entry_width)
+        layout_pixel.addStretch(1)
+
+        # ==== Nhóm Ảnh / Batch (group lớn) ====
+        grp_image = QGroupBox("🖼 Công cụ chuyển Ảnh")
+        main.addWidget(grp_image)
+
+        layout_img = QHBoxLayout(grp_image)
+        # layout_img.setSpacing(20)
+
+        # =====================================
+        # 1) GROUP TRÁI: XỬ LÝ 1 ẢNH
+        # =====================================
+        grp_single = QGroupBox("📦 Xử lý 1 ảnh")
+        layout_left = QVBoxLayout(grp_single)
+        layout_left.setAlignment(Qt.AlignTop)
+
+        # --- Hàng nút chọn ảnh + lưu ảnh ---
+        row_buttons = QHBoxLayout()
 
         btn_open = QPushButton("📁 Chọn ảnh...")
         btn_open.clicked.connect(self.open_image)
-        ctl.addWidget(btn_open)
-
-        ctl.addWidget(QLabel("🔧 Pixel POI (15-72):"))
-        self.entry_width = QLineEdit("72")
-        self.entry_width.setFixedWidth(80)
-        ctl.addWidget(self.entry_width)
-
-        btn_preview = QPushButton("👀 Xem trước")
-        btn_preview.clicked.connect(self.preview_convert)
-        ctl.addWidget(btn_preview)
+        row_buttons.addWidget(btn_open)
 
         btn_save = QPushButton("💾 Lưu tệp ảnh POI ...")
         btn_save.clicked.connect(self.save_as_bmp)
-        ctl.addWidget(btn_save)
+        row_buttons.addWidget(btn_save)
 
-        ctl.addStretch(1)
+        layout_left.addLayout(row_buttons)
 
-        # ==== dòng tùy chọn đặc biệt ====
-        ctl2 = QHBoxLayout()
-        main.addLayout(ctl2)
+        # --- Label thông tin ảnh ---
+        self.lbl_info = QLabel("Chưa tải/chọn ảnh.")
+        layout_left.addWidget(self.lbl_info)
 
-        btn_multi = QPushButton("✨ Chuyển nhiều ảnh… (Batch)")
+        layout_img.addWidget(grp_single, stretch=2)
+
+        # =====================================
+        # 2) GROUP PHẢI: CHUYỂN NHIỀU ẢNH
+        # =====================================
+        grp_multi = QGroupBox("📦 Chuyển nhiều ảnh")
+        layout_right = QVBoxLayout(grp_multi)
+        layout_right.setAlignment(Qt.AlignTop)
+
+        btn_multi = QPushButton("✨ Chuyển nhiều ảnh…")
         btn_multi.clicked.connect(self.convert_multiple)
-        ctl2.addWidget(btn_multi)
+        layout_right.addWidget(btn_multi)
 
-        ctl2.addStretch(1)
+        layout_img.addWidget(grp_multi, stretch=1)
 
-        # ==== combobox scan ARGB ====
-        ctl3 = QHBoxLayout()
-        main.addLayout(ctl3)
 
+        # ==== Nhóm ARGB / LED tách 2 nhóm nhỏ ==== 
+        grp_argb_main = QGroupBox("🌐 Mạch ARGB / LED")
+        main.addWidget(grp_argb_main)
+        layout_argb_main = QHBoxLayout(grp_argb_main)
+
+        # --- Nhóm 1: Chọn mạch + gửi ảnh ---
+        grp_mach = QGroupBox("Chọn / Gửi ARGB")
+        layout_mach = QHBoxLayout(grp_mach)
+
+        layout_mach.addWidget(QLabel("Chọn/mạch ARGB:"))
         self.combo_ip = QComboBox()
         self.combo_ip.setEditable(True)
         self.combo_ip.setMinimumWidth(200)
-        ctl3.addWidget(QLabel("🌐 Chọn/mạch ARGB:"))
-        ctl3.addWidget(self.combo_ip)
+        layout_mach.addWidget(self.combo_ip)
 
-
-        btn_scan = QPushButton("🔍 Tim ARGB")
+        btn_scan = QPushButton("🔍 Tìm ARGB")
         btn_scan.clicked.connect(self.scan_argb_mdns)
-        ctl3.addWidget(btn_scan)
-        # ctl3.addStretch(1)
+        layout_mach.addWidget(btn_scan)
 
-        btn_send = QPushButton("📤 Gửi dữ liệu đến ARGB")
+        btn_send = QPushButton("📤 Gửi ảnh preview")
         btn_send.clicked.connect(self.send_to_argb)
-        ctl3.addWidget(btn_send)
+        layout_mach.addWidget(btn_send)
 
-        # ----- Nút Setting -----
-        btn_settings = QPushButton("⚙️ Cài đặt ARGB")
-        ctl3.addWidget(btn_settings)
+        btn_sends = QPushButton("📤 Gửi nhiều ảnh")
+        def on_send_multiple():
+            # Xóa hình hiển thị
+            self.lbl_preview.clear()
+            # Gọi hàm gửi nhiều ảnh
+            self.send_multiple_to_argb()
+
+        btn_sends.clicked.connect(on_send_multiple)
+        layout_mach.addWidget(btn_sends)
+
+        layout_mach.addStretch(1)
+        grp_mach.setLayout(layout_mach)
+        layout_argb_main.addWidget(grp_mach, stretch=2)  # chiếm phần lớn
+
+        # --- Nhóm 2: Nút điều khiển LED ---
+        grp_control = QGroupBox("Điều khiển LED")
+        layout_control = QHBoxLayout(grp_control)
+
+        btn_settings = QPushButton("⚙️ Cài đặt")
         btn_settings.clicked.connect(self.settings_led)
+        layout_control.addWidget(btn_settings)
 
-        btn_off = QPushButton("💡 Tắt LED ARGB")
-        ctl3.addWidget(btn_off)
+        btn_off = QPushButton("💡 Tắt LED")
         btn_off.clicked.connect(self.turn_off_led)
+        layout_control.addWidget(btn_off)
 
-        # ==== label thông tin ====
-        self.lbl_info = QLabel("Chưa tải/chọn ảnh.")
-        main.addWidget(self.lbl_info)
+        btn_sync = QPushButton("🔗 Đồng bộ Mạch POI")
+        btn_sync.clicked.connect(self.sync_poi)
+        layout_control.addWidget(btn_sync)
+
+        layout_control.addStretch(1)
+        grp_control.setLayout(layout_control)
+        layout_argb_main.addWidget(grp_control, stretch=1)  # chiếm ít hơn
+
+
 
         # ==== vùng preview ====
         frame = QFrame()
@@ -308,6 +391,20 @@ class BMPConverter(QWidget):
 
         QDesktopServices.openUrl(QUrl(f"http://{ip}/"))
 
+    # ====================
+    # Đồng bộ POI (chưa implement)
+    def sync_poi(self):
+        """
+        Hàm đồng bộ các mạch POI.
+        Hiện tại chỉ thông báo đang được xây dựng.
+        """
+        from PySide6.QtWidgets import QMessageBox
+
+        QMessageBox.information(
+            self,
+            "🚧 Tính năng đang xây dựng",
+            "Tính năng Đồng bộ các Mạch POI hiện đang được xây dựng. Vui lòng thử lại sau."
+        )
 
     # ====================
     # Tắt LED ARGB
@@ -432,7 +529,6 @@ class BMPConverter(QWidget):
         self.layout().setMenuBar(bar)
 
 
-
     # ====================
     # About
     # ====================
@@ -475,7 +571,7 @@ class BMPConverter(QWidget):
             self.entry_width.setStyleSheet("")
             return 72
 
-        if w < 15 or w > 72:
+        if w < 14 or w > 72:
             # Reset về 72 khi sai kiểu dữ liệu
             self.entry_width.setText("72")
             self._warn_width("Giá trị phải nằm trong khoảng 15 đến 72 pixel.")
@@ -767,6 +863,129 @@ class BMPConverter(QWidget):
         finally:
             import os
             os.unlink(tmp_file.name)
+
+
+    # ====================
+    # Gửi nhiều ảnh đến ARGB (Preset tăng dần)
+    def send_multiple_to_argb(self):
+        """
+        Mở dialog chọn nhiều ảnh, gửi lần lượt đến ARGB,
+        lưu Preset tăng dần và xử lý HTTP 401 (PIN ARGB) với popup gửi lại.
+        """
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from PIL import Image
+        import tempfile, os, requests
+
+        # 1️⃣ Chọn nhiều file ảnh
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self, "Chọn ảnh để gửi ARGB", "", "Images (*.png *.jpg *.bmp)"
+        )
+        if not file_paths:
+            return
+
+        # 2️⃣ Load ảnh PIL
+        try:
+            images = [Image.open(p) for p in file_paths]
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi", f"Không thể load ảnh: {e}")
+            return
+
+        # 3️⃣ Lấy IP mạch
+        ip = self.combo_ip.currentData()
+        if not ip:
+            QMessageBox.warning(self, "Chưa chọn mạch", "Vui lòng chọn mạch ARGB hợp lệ.")
+            return
+
+        # 4️⃣ Lấy width target
+        w = self._get_target_width()
+        if not w:
+            return
+
+        # 5️⃣ Gửi lần lượt từng ảnh
+        for idx, img in enumerate(images, start=1):
+            while True:  # Vòng lặp để hỗ trợ "Gửi lại"
+                try:
+                    # Chuyển sang vuông RGB 24-bit
+                    bmp_image = self._convert_to_square_rgb(w, img)
+
+                    # Lưu tạm
+                    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".bmp")
+                    bmp_image.save(tmp_file.name, "BMP")
+                    tmp_file.close()
+                    output_name = os.path.basename(tmp_file.name)
+
+                    # --- Upload BMP ---
+                    url_upload = f"http://{ip}/upload"
+                    with open(tmp_file.name, "rb") as f:
+                        files = {"data": f}
+                        r = requests.post(url_upload, files=files, timeout=5)
+
+                    if r.status_code == 200:
+                        print(f"[INFO] Upload ảnh {idx} thành công")
+                        break  # Upload thành công, thoát vòng while
+
+                    elif r.status_code == 401:
+                        # Nếu bị khóa PIN, hiển thị popup
+                        msg = QMessageBox(self)
+                        msg.setWindowTitle("Khóa PIN ARGB")
+                        msg.setText(f"Upload ảnh {idx} thất bại: HTTP 401 (khóa mã PIN)")
+
+                        btn_open_pin = msg.addButton("Mở mã PIN ARGB", QMessageBox.ActionRole)
+                        btn_retry = msg.addButton("Gửi lại", QMessageBox.AcceptRole)
+                        msg.addButton("Đóng", QMessageBox.RejectRole)
+
+                        msg.exec()
+
+                        clicked = msg.clickedButton()
+                        if clicked == btn_open_pin:
+                            QDesktopServices.openUrl(QUrl(f"http://{ip}/settings/sec"))
+                            continue  # quay lại vòng while, user có thể mở PIN và bấm Gửi lại
+                        elif clicked == btn_retry:
+                            continue  # gửi lại ảnh hiện tại
+                        else:
+                            print(f"[WARN] Người dùng bỏ qua ảnh {idx}")
+                            break  # thoát vòng while, bỏ qua ảnh
+
+                    else:
+                        print(f"[WARN] Upload ảnh {idx} thất bại HTTP {r.status_code}")
+                        break  # bỏ qua ảnh này
+
+                except Exception as e:
+                    print(f"[ERROR] Gửi ảnh {idx} thất bại: {e}")
+                    break  # bỏ qua ảnh này
+
+                finally:
+                    if os.path.exists(tmp_file.name):
+                        os.unlink(tmp_file.name)
+
+            # --- POST JSON cập nhật LED và lưu Preset ---
+            try:
+                url_state = f"http://{ip}/json/state"
+                json_payload = {
+                    "on": True,
+                    "bri": 100,
+                    "seg": [
+                        {
+                            "id": 0,
+                            "on": True,
+                            "bri": 60,
+                            "n": f"/{output_name}",
+                            "fx": 48
+                        }
+                    ],
+                    "psave": idx  # Preset tăng dần
+                }
+                r2 = requests.post(url_state, json=json_payload, timeout=3)
+                if r2.status_code == 200:
+                    print(f"[INFO] Ảnh {idx} cập nhật thành công: Preset {idx}")
+                else:
+                    print(f"[WARN] POST JSON ảnh {idx} thất bại HTTP {r2.status_code}")
+            except Exception as e2:
+                print(f"[ERROR] Không thể cập nhật JSON ảnh {idx}: {e2}")
+
+        QMessageBox.information(self, "Hoàn tất", f"Đã gửi {len(images)} ảnh tới ARGB thành công!")
 
 
 
