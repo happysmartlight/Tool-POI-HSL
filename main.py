@@ -467,27 +467,25 @@ class BMPConverter(QWidget):
         # -----------------------------
         # XÁC MINH LẦN 1
         # -----------------------------
-        confirm_1 = QMessageBox.question(
+        if QMessageBox.question(
             self,
             "Xác nhận lần 1",
             "⚠️ Bạn sắp XÓA TẤT CẢ PRESET (Preset 1 → N) trên thiết bị!\n\n"
             "Hành động này KHÔNG THỂ hoàn tác.\n"
             "Bạn có chắc muốn tiếp tục không?",
             QMessageBox.Yes | QMessageBox.No
-        )
-        if confirm_1 != QMessageBox.Yes:
+        ) != QMessageBox.Yes:
             return
 
         # -----------------------------
         # XÁC MINH LẦN 2
         # -----------------------------
-        confirm_2 = QMessageBox.question(
+        if QMessageBox.question(
             self,
             "Xác nhận lần 2",
             "🚨 CẢNH BÁO CUỐI CÙNG!\nBạn thực sự muốn xóa TOÀN BỘ PRESET không?",
             QMessageBox.Yes | QMessageBox.No
-        )
-        if confirm_2 != QMessageBox.Yes:
+        ) != QMessageBox.Yes:
             return
 
         # 1️⃣ Kiểm tra online
@@ -495,87 +493,106 @@ class BMPConverter(QWidget):
             QMessageBox.critical(self, "Không online", f"Mạch ARGB {ip} không phản hồi!")
             return
 
-        # 2️⃣ Lấy danh sách preset
+        # ===============================================================
+        # ⭐ 2️⃣ LẤY PRESET (NẾU CÓ)
+        # ===============================================================
+        preset_ids = []
         try:
             r = requests.get(f"http://{ip}/presets.json", timeout=2)
-            presets = r.json()
-        except Exception as e:
-            QMessageBox.critical(self, "Lỗi", f"Không đọc được presets.json:\n{e}")
-            return
-
-        # Lấy preset hợp lệ ID >= 1
-        preset_ids = [int(k) for k in presets.keys() if k.isdigit() and int(k) >= 1]
-        preset_ids.sort()
-
-        if not preset_ids:
-            QMessageBox.information(self, "Không có preset", "Thiết bị không có preset để xóa.")
-            return
-
-        # ===============================================================
-        # ⭐ 3️⃣ ĐƯA THIẾT BỊ VỀ TRẠNG THÁI AN TOÀN
-        # ===============================================================
-        try:
-            requests.post(f"http://{ip}/json/state", json={"ps": 0}, timeout=2)
-            requests.post(f"http://{ip}/json/state", json={"on": False}, timeout=2)
+            if r.status_code == 200:
+                presets = r.json()
+                preset_ids = [
+                    int(k) for k in presets.keys()
+                    if k.isdigit() and int(k) >= 1
+                ]
+                preset_ids.sort()
         except:
-            QMessageBox.critical(
-                self,
-                "Lỗi",
-                "Không thể đưa thiết bị về trạng thái an toàn (preset 0 + tắt LED)."
-            )
-            return
+            pass   # ❗ Không return → vẫn cho phép xóa BMP
 
         # ===============================================================
-        # ⭐ 4️⃣ XÓA PRESET: { "pdel": ID }
+        # ⭐ 3️⃣ ĐƯA THIẾT BỊ VỀ TRẠNG THÁI AN TOÀN (CHỈ KHI CÓ PRESET)
         # ===============================================================
-        failed = []
-
-        for pid in preset_ids:
+        if preset_ids:
             try:
-                r = requests.post(
-                    f"http://{ip}/json/state",
-                    json={"pdel": pid},
-                    timeout=2
-                )
-                if r.status_code != 200:
-                    failed.append(pid)
+                requests.post(f"http://{ip}/json/state", json={"ps": 0}, timeout=2)
+                requests.post(f"http://{ip}/json/state", json={"on": False}, timeout=2)
             except:
-                failed.append(pid)
+                QMessageBox.warning(
+                    self,
+                    "Cảnh báo",
+                    "Không thể đưa thiết bị về trạng thái an toàn.\n"
+                    "Vẫn tiếp tục xóa preset & file BMP."
+                )
 
-        # 5️⃣ Báo cáo preset
-        if failed:
-            QMessageBox.warning(
-                self,
-                "Xóa chưa hoàn tất",
-                "Một số preset không xóa được:\n" + ", ".join(map(str, failed))
-            )
+            # ===============================================================
+            # ⭐ 4️⃣ XÓA PRESET
+            # ===============================================================
+            failed = []
+
+            for pid in preset_ids:
+                try:
+                    r = requests.post(
+                        f"http://{ip}/json/state",
+                        json={"pdel": pid},
+                        timeout=2
+                    )
+                    if r.status_code != 200:
+                        failed.append(pid)
+                except:
+                    failed.append(pid)
+
+            if failed:
+                QMessageBox.warning(
+                    self,
+                    "Xóa preset chưa hoàn tất",
+                    "Một số preset không xóa được:\n" + ", ".join(map(str, failed))
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Preset đã xóa",
+                    f"🎉 Đã xóa {len(preset_ids)} preset thành công!"
+                )
         else:
             QMessageBox.information(
                 self,
-                "Preset đã xóa",
-                f"🎉 Đã xóa {len(preset_ids)} preset thành công!"
+                "Không có preset",
+                "Không tìm thấy preset nào.\nTiếp tục xử lý xóa file BMP."
             )
 
         # ===============================================================
-        # ⭐ 6️⃣ HỎI NGƯỜI DÙNG CÓ MUỐN XÓA FILE BMP KHÔNG?
+        # ⭐ 6️⃣ HỎI CÓ MUỐN XÓA FILE BMP KHÔNG
         # ===============================================================
-        confirm_bmp = QMessageBox.question(
+        if QMessageBox.question(
             self,
             "Xóa file ảnh BMP?",
             "Bạn có muốn xóa toàn bộ file ảnh (*.bmp) trong bộ nhớ thiết bị không?",
             QMessageBox.Yes | QMessageBox.No
-        )
-
-        if confirm_bmp != QMessageBox.Yes:
+        ) != QMessageBox.Yes:
             return
 
         # ===============================================================
-        # ⭐ 7️⃣ LẤY DANH SÁCH FILE CHUẨN /edit?list (trả về LIST)
+        # ⭐ 7️⃣ LẤY DANH SÁCH FILE /edit?list
         # ===============================================================
         try:
             r = requests.get(f"http://{ip}/edit?list", timeout=3)
+
+            # 🔐 Thiết bị bị khóa PIN
+            if r.status_code == 401:
+                QMessageBox.warning(
+                    self,
+                    "Thiết bị bị khóa",
+                    "🔒 Mạch ARGB đang bị khóa bằng mã PIN.\n"
+                    "Vui lòng mở khóa trong phần Cài đặt."
+                )
+                return
+
             if r.status_code != 200:
-                QMessageBox.critical(self, "Lỗi", f"Không lấy được danh sách file! HTTP {r.status_code}")
+                QMessageBox.critical(
+                    self,
+                    "Lỗi",
+                    f"Không lấy được danh sách file!\nHTTP {r.status_code}"
+                )
                 return
 
             files = r.json()
@@ -583,7 +600,6 @@ class BMPConverter(QWidget):
                 QMessageBox.critical(self, "Lỗi", "Phản hồi không đúng dạng list!")
                 return
 
-            # Lọc file *.bmp
             bmp_files = [
                 f["name"]
                 for f in files
@@ -598,11 +614,15 @@ class BMPConverter(QWidget):
             return
 
         if not bmp_files:
-            QMessageBox.information(self, "Không có file BMP", "Thiết bị không có file ảnh BMP để xóa.")
+            QMessageBox.information(
+                self,
+                "Không có file BMP",
+                "Thiết bị không có file ảnh BMP để xóa."
+            )
             return
 
         # ===============================================================
-        # ⭐ 8️⃣ XÓA FILE BMP BẰNG func=delete
+        # ⭐ 8️⃣ XÓA FILE BMP
         # ===============================================================
         failed_bmp = []
 
@@ -619,7 +639,7 @@ class BMPConverter(QWidget):
                 failed_bmp.append(filename)
 
         # ===============================================================
-        # ⭐ 9️⃣ Báo cáo kết quả
+        # ⭐ 9️⃣ BÁO CÁO
         # ===============================================================
         if failed_bmp:
             QMessageBox.warning(
@@ -1142,16 +1162,36 @@ class BMPConverter(QWidget):
             QMessageBox.warning(self, "Chưa chọn mạch", "Vui lòng chọn mạch ARGB hợp lệ.")
             return
 
-        # ⭐ KIỂM TRA KẾT NỐI TRƯỚC: TRÁNH CONNECT TIMEOUT
+        # ⭐ KIỂM TRA KẾT NỐI TRƯỚC
         if not self._is_device_online(ip):
             QMessageBox.critical(
-                self, 
+                self,
                 "Thiết bị không online",
                 f"Không thể kết nối đến {ip}.\nThiết bị có thể đã tắt nguồn hoặc mất WiFi."
             )
             return
 
-        # Chuẩn bị file tạm
+        # ======================
+        # 🧩 A) TẠO TÊN PRESET TỪ TÊN FILE ẢNH GỐC
+        # ======================
+        import re
+
+        base_name = os.path.basename(self.input_path)            # vd: logo_hsl_demo.png
+        name_no_ext = os.path.splitext(base_name)[0]             # logo_hsl_demo
+
+        # chỉ giữ ký tự an toàn
+        safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", name_no_ext)
+
+        # giới hạn 20 ký tự
+        preset_name = safe_name[:20] if len(safe_name) > 20 else safe_name
+        if not preset_name:
+            preset_name = "Preset_1"
+
+        upload_filename = preset_name + ".bmp"   # tên file BMP upload
+
+        # ======================
+        # Chuẩn bị file BMP
+        # ======================
         w = self._get_target_width()
         if not w:
             return
@@ -1162,27 +1202,25 @@ class BMPConverter(QWidget):
         im2.save(tmp.name, "BMP")
         tmp.close()
 
-        output_name = os.path.basename(tmp.name)
-
         try:
             # ======================
-            # 1) UPLOAD FILE — CÓ VÒNG LẶP XỬ LÝ 401
+            # 1) UPLOAD FILE — HỖ TRỢ 401
             # ======================
             while True:
-                # Trước mỗi lần retry 401 — kiểm tra thiết bị còn sống không
                 if not self._is_device_online(ip):
                     QMessageBox.critical(
                         self,
                         "Mất kết nối",
-                        f"Thiết bị {ip} đã mất kết nối trong khi upload.\n"
-                        "Vui lòng kiểm tra nguồn pin hoặc WiFi."
+                        f"Thiết bị {ip} đã mất kết nối trong khi upload."
                     )
                     return
 
                 url_upload = f"http://{ip}/upload"
 
                 with open(tmp.name, "rb") as f:
-                    files = {"data": f}
+                    files = {
+                        "data": (upload_filename, f, "image/bmp")
+                    }
                     try:
                         r = requests.post(url_upload, files=files, timeout=5)
                     except Exception:
@@ -1193,9 +1231,7 @@ class BMPConverter(QWidget):
                         )
                         return
 
-                # -----------------------------
-                # Lỗi 401 → yêu cầu PIN
-                # -----------------------------
+                # ---- 401 PIN ----
                 if r.status_code == 401:
                     msg = QMessageBox(self)
                     msg.setWindowTitle("Thiết bị đang bị khóa (401)")
@@ -1206,36 +1242,26 @@ class BMPConverter(QWidget):
                     btn_cancel = msg.addButton("Hủy", QMessageBox.RejectRole)
                     msg.exec()
 
-                    clicked = msg.clickedButton()
-
-                    if clicked == btn_open:
+                    if msg.clickedButton() == btn_open:
                         QDesktopServices.openUrl(QUrl(f"http://{ip}/settings/sec"))
-                        # ⭐ KHÔNG RETURN → tiếp tục hiện popup lại / retry
-                        continue  
-
-                    elif clicked == btn_retry:
-                        # ⭐ Thử lại ngay
                         continue
-                
+                    elif msg.clickedButton() == btn_retry:
+                        continue
                     else:
                         return
 
-                # -----------------------------
-                # Lỗi HTTP khác ≠ 200
-                # -----------------------------
                 elif r.status_code != 200:
                     QMessageBox.warning(
-                        self, 
+                        self,
                         "Lỗi Upload",
                         f"Upload không thành công!\nHTTP {r.status_code}"
                     )
                     return
 
-                # Upload thành công → break
-                break
+                break  # upload OK
 
             # ======================
-            # 2) POST JSON cấu hình LED
+            # 2) POST JSON CẤU HÌNH + LƯU PRESET
             # ======================
             url_state = f"http://{ip}/json/state"
             json_payload = {
@@ -1246,32 +1272,30 @@ class BMPConverter(QWidget):
                         "id": 0,
                         "on": True,
                         "bri": 60,
-                        "n": f"/{output_name}",
+                        "n": f"/{upload_filename}",
                         "fx": 48
                     }
                 ],
-                "psave": 1
+                "psave": 1,
+                "n": preset_name        # ⭐ TÊN PRESET RÕ RÀNG
             }
 
-            try:
-                r2 = requests.post(url_state, json=json_payload, timeout=3)
-                if r2.status_code != 200:
-                    print(f"[WARN] POST JSON thất bại HTTP {r2.status_code}")
-            except Exception:
-                QMessageBox.critical(
-                    self,
-                    "Lỗi JSON API",
-                    "Không thể gửi lệnh cấu hình LED.\nThiết bị có thể đã mất kết nối."
-                )
-                return
+            r2 = requests.post(url_state, json=json_payload, timeout=3)
+            if r2.status_code != 200:
+                print(f"[WARN] POST JSON thất bại HTTP {r2.status_code}")
 
-            QMessageBox.information(self, "Hoàn tất", f"Đã gửi BMP đến {ip} thành công!")
+            QMessageBox.information(
+                self,
+                "Hoàn tất",
+                f"Đã gửi ảnh và lưu preset:\n{preset_name}"
+            )
 
         except Exception as e:
             QMessageBox.critical(self, "Lỗi", f"Không thể gửi BMP:\n{e}")
 
         finally:
             os.unlink(tmp.name)
+
 
 
 
