@@ -5,6 +5,7 @@ from PySide6.QtGui import *
 from PySide6.QtCore import *
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtCore import QTimer, QUrl
+from PySide6.QtWidgets import QColorDialog
 
 from config import APP_TITLE, APP_VERSION, APP_COMPANY, resource_path
 from widgets import PixelPreview, PixelIndexBar
@@ -37,6 +38,15 @@ class BMPConverter(QWidget):
         self.loaded_image = None
         self.preview_qpix = None
 
+        # ==== màu LED theo chuẩn col[] ====
+        self.col = [
+            QColor(255, 0, 0),    # col[0] - Primary
+            QColor(0, 0, 0),      # col[1] - Secondary
+            QColor(64, 64, 64)    # col[2] - Tertiary
+        ]
+        self.color_buttons = []
+
+
         # ==== layout chính ====
         main = QVBoxLayout(self)
 
@@ -68,6 +78,63 @@ class BMPConverter(QWidget):
         note.setStyleSheet(f"color: {text_color.name()}; font-size: 12px;")
 
         layout_pixel.addWidget(note)
+
+        # ==== GROUP MÀU LED (COLOR WHEEL) ====
+        grp_color = QGroupBox("🎨 Màu LED (col)")
+        layout_color = QVBoxLayout(grp_color)
+        layout_color.setSpacing(6)
+    
+        labels = [
+            "🎨 Màu chính",
+            "🌑 Màu nền",
+            "✨ Màu điểm nhấn"
+        ]
+
+        self.color_buttons = []
+        self.color_previews = []
+
+        for i, label in enumerate(labels):
+            row = QHBoxLayout()
+            row.setSpacing(6)
+
+            # ===== NÚT CHỌN MÀU =====
+            btn = QPushButton(label)
+            btn.setFixedHeight(30)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #2b2b2b;
+                    color: white;
+                    border: 1px solid #444;
+                    border-radius: 4px;
+                    padding-left: 8px;
+                    text-align: left;
+                }
+                QPushButton:hover {
+                    background-color: #3a3a3a;
+                }
+            """)
+            btn.clicked.connect(lambda _, x=i: self.pick_color(x))
+
+            # ===== Ô HIỂN THỊ MÀU =====
+            preview = QLabel()
+            preview.setFixedSize(32, 30)
+            preview.setStyleSheet("""
+                background-color: black;
+                border: 1px solid #666;
+                border-radius: 4px;
+            """)
+
+            self.color_buttons.append(btn)
+            self.color_previews.append(preview)
+
+            row.addWidget(btn, 1)
+            row.addWidget(preview, 0)
+
+            layout_color.addLayout(row)
+
+        layout_color.addStretch(1)
+
+
         # ==== Nhóm Ảnh / Batch (group lớn) ====
         grp_image = QGroupBox("🖼 Công cụ chuyển Ảnh")
 
@@ -119,6 +186,7 @@ class BMPConverter(QWidget):
         # ============================================
         top_row = QHBoxLayout()
         top_row.addWidget(grp_pixel, stretch=1)
+        top_row.addWidget(grp_color, stretch=1)   # 👈 BÁNH XE MÀU Ở GIỮA
         top_row.addWidget(grp_image, stretch=3)
 
         main.addLayout(top_row)
@@ -146,6 +214,10 @@ class BMPConverter(QWidget):
         btn_scan = QPushButton("🔍 Tìm ARGB")
         btn_scan.clicked.connect(self.scan_argb_mdns)
         layout_mach.addWidget(btn_scan)
+
+        btn_open = QPushButton("📁 Chọn ảnh...")
+        btn_open.clicked.connect(self.open_image)
+        layout_mach.addWidget(btn_open)
 
         btn_send = QPushButton("📤 Gửi ảnh preview")
         btn_send.clicked.connect(self.send_to_argb)
@@ -211,21 +283,18 @@ class BMPConverter(QWidget):
             self.index_bar.setCount(0),
             setattr(self, "loaded_image", None)
         ))
+        left_layout.addWidget(btn_load)
 
         btn_save = QPushButton("🔄 Làm mới thông tin")
         btn_save.clicked.connect(self.refresh_device_data)
-
-        btn_refresh = QPushButton("📤 Gửi ảnh đang xem")
-        btn_refresh.clicked.connect(self.send_to_argb)
-
-        left_layout.addWidget(btn_load)
         left_layout.addWidget(btn_save)
-        left_layout.addWidget(btn_refresh)
 
-        # ====== Nhóm nút chức năng FN1 → FN10 ======
-        lbl_fn = QLabel("Phím chức năng nhanh:")
-        lbl_fn.setWordWrap(True)
-        left_layout.addWidget(lbl_fn)
+
+        # ====== Đường phân cách ngang ======
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
+        left_layout.addWidget(line)
 
         for i in range(1, 11):
             btn = QPushButton(f"FN{i}  (F{i})")
@@ -364,7 +433,42 @@ class BMPConverter(QWidget):
         btn_quit.clicked.connect(self.close)
         main.addWidget(btn_quit)
 
-    
+    def send_current_effect(self):
+        item = self.list_effects.currentItem()
+        if item:
+            self.on_effect_selected(item)
+
+
+    def pick_color(self, index):
+        color = QColorDialog.getColor(
+            self.col[index],
+            self,
+            f"Chọn màu cho col[{index}]",
+            QColorDialog.ShowAlphaChannel
+        )
+
+        if not color.isValid():
+            return
+
+        self.col[index] = color
+        self.update_color_button(index)
+        self.send_current_effect()
+
+
+
+    def update_color_button(self, index):
+        c = self.col[index]
+
+        preview = self.color_previews[index]
+        preview.setStyleSheet(
+            f"""
+            background-color: rgb({c.red()}, {c.green()}, {c.blue()});
+            border: 1px solid #666;
+            border-radius: 4px;
+            """
+        )
+
+
     # ====================
     # Mở popup nhập PIN với trình duyệt nhúng
     def open_pin_browser_popup(self, ip):
@@ -512,7 +616,7 @@ class BMPConverter(QWidget):
 
 
     # ====================
-    # Khi click chọn effect → chạy ngay
+    # Khi click chọn effect → chạy ngay + gửi col[]
     def on_effect_selected(self, item):
         ip = self.combo_ip.currentData()
         if not ip or not item:
@@ -522,13 +626,21 @@ class BMPConverter(QWidget):
         if fx_id is None:
             return
 
+        # ====================
+        # Convert QColor -> JSON col
+        col_json = [
+            [c.red(), c.green(), c.blue()]
+            for c in self.col
+        ]
+
         payload = {
             "on": True,
             "bri": 128,
             "seg": [
                 {
                     "id": 0,
-                    "fx": fx_id
+                    "fx": fx_id,
+                    "col": col_json
                 }
             ]
         }
@@ -539,15 +651,31 @@ class BMPConverter(QWidget):
                 json=payload,
                 timeout=2
             )
-            
-            self.highlight_current_effect()
+
+            # 🔐 Nếu bị khóa PIN
+            if r.status_code == 401:
+                QMessageBox.warning(
+                    self,
+                    "Thiết bị bị khóa",
+                    "🔒 Thiết bị đang bị khóa bằng mã PIN.\n"
+                    "Vui lòng mở khóa rồi thử lại."
+                )
+                return
 
             if r.status_code != 200:
-                print(f"[FX] HTTP {r.status_code}")
+                QMessageBox.warning(
+                    self,
+                    "Lỗi",
+                    f"Không chạy được effect!\nHTTP {r.status_code}"
+                )
+                return
+
+            # (Optional) highlight effect đang chạy
+            self.highlight_current_effect()
 
         except Exception as e:
-            print(f"[FX] Lỗi chạy effect {fx_id}: {e}")
-        # ====================
+            QMessageBox.critical(self, "Lỗi", str(e))
+
 
     # ====================
     # Double-click effect → lưu thành preset (user nhập ID)
@@ -1452,10 +1580,22 @@ class BMPConverter(QWidget):
             self.loaded_image = img.copy()
             img.close()
 
-            self.lbl_info.setText(
-                f"Đã tải: {os.path.basename(file)} — kích thước {self.loaded_image.width}x{self.loaded_image.height}"
+            # ====== GÁN THÔNG TIN CHO PREVIEW ======
+            # ảnh gốc
+            self.lbl_preview.source_name = os.path.basename(file)
+            self.lbl_preview.source_size = (
+                self.loaded_image.width,
+                self.loaded_image.height
             )
+            # ======================================
+
+            self.lbl_info.setText(
+                f"Đã tải: {os.path.basename(file)} — "
+                f"kích thước {self.loaded_image.width}x{self.loaded_image.height}"
+            )
+
             self.preview_convert()
+
         except Exception as e:
             QMessageBox.critical(self, "Lỗi", f"Không thể mở ảnh:\n{e}")
 

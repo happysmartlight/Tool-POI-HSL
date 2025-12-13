@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QWidget
-from PySide6.QtGui import QPainter, QColor, QPalette, QFont, QPen, QImage
-from PySide6.QtCore import Qt
+from PySide6.QtGui import QPainter, QColor, QPalette, QFont, QPen, QImage, QFontMetrics
+from PySide6.QtCore import Qt, QRect
 
 class PixelPreview(QWidget):
     def __init__(self):
@@ -19,18 +19,30 @@ class PixelPreview(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        pal = self.palette()
+
+        # ==========================
+        # CHƯA CÓ ẢNH
+        # ==========================
         if self.image is None:
-            pal = self.palette()
             painter.fillRect(self.rect(), pal.color(QPalette.Window))
             painter.setPen(pal.color(QPalette.WindowText))
             painter.setFont(QFont("Arial", 12))
-            painter.drawText(self.rect(), Qt.AlignCenter,
-                             "Khu vực hiển thị ảnh xem trước khi quay Poi")
+            painter.drawText(
+                self.rect(),
+                Qt.AlignCenter,
+                "Khu vực hiển thị ảnh xem trước khi quay Poi"
+            )
             return
 
+        # ==========================
+        # CÓ ẢNH → VẼ PIXEL
+        # ==========================
         painter.setRenderHint(QPainter.Antialiasing, False)
+
         w, h = self.width(), self.height()
         img_w, img_h = self.image.width(), self.image.height()
+
         px = min(w // img_w, h // img_h)
         ox = (w - img_w * px) // 2
         oy = (h - img_h * px) // 2
@@ -38,10 +50,63 @@ class PixelPreview(QWidget):
         for y in range(img_h):
             for x in range(img_w):
                 color = QColor(self.image.pixel(x, y))
-                painter.fillRect(ox + x*px, oy + y*px, px, px, color)
+                painter.fillRect(ox + x * px, oy + y * px, px, px, color)
+
                 if self.grid and px >= 4:
                     painter.setPen(QColor(40, 40, 40))
-                    painter.drawRect(ox + x*px, oy + y*px, px, px)
+                    painter.drawRect(ox + x * px, oy + y * px, px, px)
+
+        # # ==========================
+        # # OVERLAY THÔNG TIN ẢNH
+        # # (1 dòng – Giữa – Dưới ảnh – Không đè)
+        # # ==========================
+        # src_name = getattr(self, "source_name", "Ảnh gốc")
+
+        # info_text = f"{src_name}  →  POI Pixel Preview ({img_w} x {img_h} px)"
+
+        # padding = 8
+        # margin = 10
+        # font = QFont("Arial", 7)
+        # fm = QFontMetrics(font)
+
+        # text_w = fm.horizontalAdvance(info_text)
+        # text_h = fm.height()
+
+        # rect_w = text_w + padding * 2
+        # rect_h = text_h + padding * 2
+
+        # # 🔥 CANH GIỮA NGANG
+        # overlay_x = (self.width() - rect_w) // 2
+
+        # # 🔥 NẰM NGAY DƯỚI ẢNH
+        # overlay_y = oy + img_h * px + margin
+
+        # # Nếu không đủ chỗ dưới → đẩy lên trên ảnh
+        # if overlay_y + rect_h > self.height():
+        #     overlay_y = max(0, oy - rect_h - margin)
+
+        # info_rect = QRect(
+        #     overlay_x,
+        #     overlay_y,
+        #     rect_w,
+        #     rect_h
+        # )
+
+        # # nền mờ
+        # painter.setBrush(QColor(0, 0, 0, 160))
+        # painter.setPen(Qt.NoPen)
+        # painter.drawRoundedRect(info_rect, 6, 6)
+
+        # # text
+        # painter.setPen(Qt.white)
+        # painter.setFont(font)
+        # painter.drawText(
+        #     info_rect.adjusted(padding, padding, -padding, -padding),
+        #     Qt.AlignLeft | Qt.AlignVCenter,
+        #     info_text
+        # )
+
+
 
 class PixelIndexBar(QWidget):
     def __init__(self):
