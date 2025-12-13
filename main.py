@@ -137,7 +137,8 @@ class BMPConverter(QWidget):
         self.combo_ip.setMinimumWidth(200)
         layout_mach.addWidget(self.combo_ip)
         # Tự động load info khi chọn IP
-        self.combo_ip.currentIndexChanged.connect(self.load_device_info)
+        self.combo_ip.currentIndexChanged.connect(self.refresh_device_data)
+        # self.combo_ip.currentIndexChanged.connect(self.load_preset_list)
 
         btn_scan = QPushButton("🔍 Tìm ARGB")
         btn_scan.clicked.connect(self.scan_argb_mdns)
@@ -208,8 +209,8 @@ class BMPConverter(QWidget):
             setattr(self, "loaded_image", None)
         ))
 
-        btn_save = QPushButton("💾 Lưu BMP từ preview")
-        btn_save.clicked.connect(self.save_as_bmp)
+        btn_save = QPushButton("🔄 Làm mới thông tin")
+        btn_save.clicked.connect(self.refresh_device_data)
 
         btn_refresh = QPushButton("📤 Gửi ảnh đang xem")
         btn_refresh.clicked.connect(self.send_to_argb)
@@ -274,7 +275,7 @@ class BMPConverter(QWidget):
         mid_layout.addWidget(self.lbl_device_info)
 
         # ---------- HÀNG 2: EFFECT LIST ----------
-        lbl_fx = QLabel("✨ Effects")
+        lbl_fx = QLabel("✨ Hiệu ứng (Effects)")
         lbl_fx.setStyleSheet("font-weight: bold;")
         mid_layout.addWidget(lbl_fx)
 
@@ -596,14 +597,92 @@ class BMPConverter(QWidget):
 
 
     # ==================
-    # Tải danh sách preset
+    # Tải danh sách preset (chuẩn theo JSON HSL/WLED thực tế)
     def load_preset_list(self):
-        pass
+        ip = self.combo_ip.currentData()
+        if not ip:
+            return
+
+        self.list_presets.clear()
+
+        try:
+            r = requests.get(f"http://{ip}/presets.json", timeout=3)
+            if r.status_code != 200:
+                print(f"[preset] HTTP {r.status_code}")
+                return
+
+            presets = r.json()
+            # print("[preset] RAW JSON:", presets)
+
+            if not isinstance(presets, dict):
+                print("[preset] ❌ presets.json không phải dict")
+                return
+
+            # ---- Lọc + sort preset ID hợp lệ ----
+            preset_items = []
+
+            for pid_str, pdata in presets.items():
+                # key phải là số
+                if not pid_str.isdigit():
+                    continue
+
+                pid = int(pid_str)
+
+                # ❌ Bỏ qua preset 0 hoặc object rỗng
+                if pid == 0 or not isinstance(pdata, dict) or not pdata:
+                    continue
+
+                # Tên preset nằm ở level top: "n"
+                name = pdata.get("n", f"Preset {pid}")
+
+                preset_items.append((pid, name))
+
+            # Sort theo ID tăng dần
+            preset_items.sort(key=lambda x: x[0])
+
+            # ---- Đưa lên UI ----
+            for pid, name in preset_items:
+                item = QListWidgetItem(f"[{pid}] {name}")
+                item.setData(Qt.UserRole, pid)
+                item.setToolTip(f"Preset ID: {pid}")
+
+                self.list_presets.addItem(item)
+
+            print(f"[preset] ✔ Load {len(preset_items)} preset")
+
+        except Exception as e:
+            print(f"[load_preset_list] ❌ Exception: {e}")
+
 
     # ====================
     # Khi click chọn preset → chạy ngay
     def on_preset_selected(self, item):
-        pass
+        ip = self.combo_ip.currentData()
+        if not ip or not item:
+            return
+
+        preset_id = item.data(Qt.UserRole)
+        if preset_id is None:
+            return
+
+        payload = {
+            "on": True,
+            "ps": preset_id
+        }
+
+        try:
+            r = requests.post(
+                f"http://{ip}/json/state",
+                json=payload,
+                timeout=2
+            )
+
+            if r.status_code != 200:
+                print(f"[Preset] HTTP {r.status_code}")
+
+        except Exception as e:
+            print(f"[Preset] Lỗi chạy preset {preset_id}: {e}")
+
 
     def refresh_device_data(self):
         self.load_device_info()
@@ -839,6 +918,8 @@ class BMPConverter(QWidget):
                     "Preset đã xóa",
                     f"🎉 Đã xóa {len(preset_ids)} preset thành công!"
                 )
+                # Cập nhật lại danh sách preset
+                self.refresh_device_data()
         else:
             QMessageBox.information(
                 self,
@@ -1149,12 +1230,12 @@ class BMPConverter(QWidget):
                 # ⭐ TỰ ĐỘNG CHỌN THIẾT BỊ ĐẦU TIÊN
                 self.combo_ip.setCurrentIndex(0)
 
-                # ⭐ GỌI LOAD INFO NGAY
-                self.load_device_info()
-                # ⭐ LOAD EFFECT + PRESET
-                self.load_effect_list()
-                # ⭐ LOAD PRESET
-                self.load_preset_list()
+                # # ⭐ GỌI LOAD INFO NGAY
+                # self.load_device_info()
+                # # ⭐ LOAD EFFECT + PRESET
+                # self.load_effect_list()
+                # # ⭐ LOAD PRESET
+                # self.load_preset_list()
                 # ⭐ refresh data
                 self.refresh_device_data()
 
@@ -1600,6 +1681,8 @@ class BMPConverter(QWidget):
                 "Hoàn tất",
                 f"Đã gửi ảnh và lưu preset:\n{preset_name}"
             )
+            # Cập nhật lại danh sách preset
+            self.refresh_device_data()
 
         except Exception as e:
             QMessageBox.critical(self, "Lỗi", f"Không thể gửi BMP:\n{e}")
@@ -1744,6 +1827,8 @@ class BMPConverter(QWidget):
                         os.unlink(tmp_file.name)
 
         QMessageBox.information(self, "Hoàn tất", "🎉 Tất cả ảnh đã gửi và lưu preset thành công!")
+        # Cập nhật lại danh sách preset
+        self.refresh_device_data()
 
 
 if __name__ == "__main__":
