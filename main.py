@@ -3,6 +3,9 @@ from PIL import Image
 from PySide6.QtWidgets import *
 from PySide6.QtGui import *
 from PySide6.QtCore import *
+from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtCore import QTimer, QUrl
+
 from config import APP_TITLE, APP_VERSION, APP_COMPANY, resource_path
 from widgets import PixelPreview, PixelIndexBar
 from image_utils import convert_to_square_rgb
@@ -361,6 +364,56 @@ class BMPConverter(QWidget):
         btn_quit.clicked.connect(self.close)
         main.addWidget(btn_quit)
 
+    
+    # ====================
+    # Mở popup nhập PIN với trình duyệt nhúng
+    def open_pin_browser_popup(self, ip):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("🔐 Nhập mã PIN thiết bị")
+        dlg.resize(450, 450)
+
+        layout = QVBoxLayout(dlg)
+
+        browser = QWebEngineView()
+        start_url = f"http://{ip}/settings/sec"
+        browser.setUrl(QUrl(start_url))
+        layout.addWidget(browser)
+
+        # ===== Timer kiểm tra PIN đúng =====
+        timer = QTimer(dlg)
+        timer.setInterval(1000)  # 1s
+
+        def check_pin_ok():
+            try:
+                r = requests.get(f"http://{ip}/edit", timeout=0.5)
+                if r.status_code == 200:
+                    timer.stop()
+                    dlg.accept()   # 🔓 PIN ĐÚNG → ĐÓNG
+                    self.refresh_device_data()
+            except:
+                pass
+
+        timer.timeout.connect(check_pin_ok)
+        timer.start()
+
+        # ===== BẮT SỰ KIỆN CHUYỂN HƯỚNG URL =====
+        def on_url_changed(url: QUrl):
+            url_str = url.toString()
+            print("[PIN Browser] URL:", url_str)
+
+            # 👉 Nếu quay về /settings (rời khỏi /settings/sec)
+            if "/settings" in url_str and "/settings/sec" not in url_str:
+                print("[PIN] Redirect về /settings → đóng popup")
+                timer.stop()
+                dlg.reject()   # ❌ PIN SAI → ĐÓNG POPUP
+
+        browser.urlChanged.connect(on_url_changed)
+
+        dlg.exec()
+
+
+
+    
     # ====================
     # Kiểm tra mạch ARGB online
     def _is_device_online(self, ip):
@@ -945,14 +998,47 @@ class BMPConverter(QWidget):
             r = requests.get(f"http://{ip}/edit?list", timeout=3)
 
             # 🔐 Thiết bị bị khóa PIN
+            # 🔐 Thiết bị bị khóa PIN
             if r.status_code == 401:
-                QMessageBox.warning(
-                    self,
-                    "Thiết bị bị khóa",
-                    "🔒 Mạch ARGB đang bị khóa bằng mã PIN.\n"
-                    "Vui lòng mở khóa trong phần Cài đặt."
+                msg = QMessageBox(self)
+                msg.setIcon(QMessageBox.Warning)
+                msg.setWindowTitle("Thiết bị bị khóa")
+                msg.setText(
+                    "🔒 Mạch ARGB đang bị khóa bằng mã PIN.\n\n"
+                    "Bạn muốn làm gì?"
                 )
-                return
+
+                btn_open = msg.addButton("🔐 Nhập / mở mã PIN", QMessageBox.AcceptRole)
+                btn_close = msg.addButton("❌ Đóng", QMessageBox.RejectRole)
+
+                msg.exec()
+
+                # --- User chọn mở PIN ---
+                if msg.clickedButton() == btn_open:
+                    # mở popup PIN nhúng
+                    self.open_pin_browser_popup(ip)
+
+                    # thử lại ngay logic đang xử lý
+                    try:
+                        r = requests.get(f"http://{ip}/edit?list", timeout=3)
+                    except Exception as e:
+                        QMessageBox.critical(self, "Lỗi", f"Không lấy lại danh sách file:\n{e}")
+                        return
+
+                    if r.status_code != 200:
+                        QMessageBox.warning(
+                            self,
+                            "Chưa mở được PIN",
+                            f"❌ Không thể truy cập thiết bị sau khi nhập PIN.\nHTTP {r.status_code}"
+                        )
+                        return
+
+                    # nếu OK → r sẽ được xử lý tiếp phía dưới
+
+                else:
+                    # User nhấn Đóng
+                    return
+
 
             if r.status_code != 200:
                 QMessageBox.critical(
@@ -1635,7 +1721,8 @@ class BMPConverter(QWidget):
                     msg.exec()
 
                     if msg.clickedButton() == btn_open:
-                        QDesktopServices.openUrl(QUrl(f"http://{ip}/settings/sec"))
+                        # QDesktopServices.openUrl(QUrl(f"http://{ip}/settings/sec"))
+                        self.open_pin_browser_popup(ip)
                         continue
                     elif msg.clickedButton() == btn_retry:
                         continue
@@ -1780,7 +1867,8 @@ class BMPConverter(QWidget):
                         clicked = msg.clickedButton()
 
                         if clicked == btn_open:
-                            QDesktopServices.openUrl(QUrl(f"http://{ip}/settings/sec"))
+                            # QDesktopServices.openUrl(QUrl(f"http://{ip}/settings/sec"))
+                            self.open_pin_browser_popup(ip)
                             continue
                         elif clicked == btn_retry:
                             continue
