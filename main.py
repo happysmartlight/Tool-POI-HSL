@@ -282,6 +282,8 @@ class BMPConverter(QWidget):
         self.list_effects.setSelectionMode(QListWidget.SingleSelection)
         self.list_effects.itemClicked.connect(self.on_effect_selected)
         mid_layout.addWidget(self.list_effects, 1)   # scroll được
+        # Khi Double-click effect → lưu thành preset
+        self.list_effects.itemDoubleClicked.connect(self.on_effect_double_clicked)
 
         # ---------- HÀNG 3: PRESET LIST ----------
         lbl_ps = QLabel("📦 Presets")
@@ -368,8 +370,7 @@ class BMPConverter(QWidget):
         except:
             return False
 
-    # ====================
-    # Tải dữ liệu thiết bị, effect, preset
+
     # ====================
     # Tải dữ liệu thiết bị (name, ver, wifi signal)
     def load_device_info(self):
@@ -424,14 +425,183 @@ class BMPConverter(QWidget):
     # ====================
     # Tải danh sách effect
     def load_effect_list(self):
-        pass
+        ip = self.combo_ip.currentData()
+        if not ip:
+            return
 
+        self.list_effects.clear()
+
+        try:
+            r = requests.get(f"http://{ip}/json", timeout=3)
+            if r.status_code != 200:
+                return
+
+            data = r.json()
+
+            # WLED/HSL: effects là list, index = fx id
+            effects = data.get("effects", [])
+            if not isinstance(effects, list):
+                return
+
+            for fx_id, fx_name in enumerate(effects):
+                # Hiển thị: [ID] Tên effect
+                item = QListWidgetItem(f"[{fx_id}] {fx_name}")
+                item.setData(Qt.UserRole, fx_id)
+                item.setToolTip(f"Effect ID: {fx_id}")
+                self.list_effects.addItem(item)
+
+            # ⭐ highlight effect đang chạy
+            self.highlight_current_effect()
+
+        except Exception as e:
+            print(f"[load_effect_list] Lỗi: {e}")
+
+
+    # ====================
+    # Khi click chọn effect → chạy ngay
+    def on_effect_selected(self, item):
+        ip = self.combo_ip.currentData()
+        if not ip or not item:
+            return
+
+        fx_id = item.data(Qt.UserRole)
+        if fx_id is None:
+            return
+
+        payload = {
+            "on": True,
+            "bri": 128,
+            "seg": [
+                {
+                    "id": 0,
+                    "fx": fx_id
+                }
+            ]
+        }
+
+        try:
+            r = requests.post(
+                f"http://{ip}/json/state",
+                json=payload,
+                timeout=2
+            )
+            
+            self.highlight_current_effect()
+
+            if r.status_code != 200:
+                print(f"[FX] HTTP {r.status_code}")
+
+        except Exception as e:
+            print(f"[FX] Lỗi chạy effect {fx_id}: {e}")
+        # ====================
+
+    # ====================
+    # Double-click effect → lưu thành preset (user nhập ID)
+    def on_effect_double_clicked(self, item):
+        ip = self.combo_ip.currentData()
+        if not ip or not item:
+            return
+
+        fx_id = item.data(Qt.UserRole)
+        fx_name = item.text()
+
+        # ---- Popup nhập Preset ID ----
+        preset_id, ok = QInputDialog.getInt(
+            self,
+            "Lưu Preset",
+            f"Lưu effect:\n{fx_name}\n\nNhập Preset ID muốn lưu:",
+            1,      # default value
+            1,      # min
+            250,    # max
+            1       # step
+        )
+
+        if not ok:
+            return
+
+        # ---- Xác nhận lần cuối ----
+        if QMessageBox.question(
+            self,
+            "Xác nhận lưu Preset",
+            f"⚠️ Preset ID: {preset_id}\n"
+            f"Effect: {fx_name}\n\n"
+            f"Nếu ID đã tồn tại, preset sẽ bị GHI ĐÈ.\n"
+            f"Bạn tự chịu trách nhiệm.\n\n"
+            f"Tiếp tục?",
+            QMessageBox.Yes | QMessageBox.No
+        ) != QMessageBox.Yes:
+            return
+
+        try:
+            payload = {
+                "psave": preset_id
+            }
+
+            r = requests.post(
+                f"http://{ip}/json/state",
+                json=payload,
+                timeout=2
+            )
+
+            if r.status_code == 200:
+                QMessageBox.information(
+                    self,
+                    "Đã lưu preset",
+                    f"✅ Đã lưu effect thành preset ID {preset_id}\n\n{fx_name}"
+                )
+                self.load_preset_list()
+
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Lỗi",
+                    f"Lưu preset thất bại (HTTP {r.status_code})"
+                )
+
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi", str(e))
+
+
+
+
+    # ====================
+    # Highlight effect đang chạy
+    def highlight_current_effect(self):
+        ip = self.combo_ip.currentData()
+        if not ip:
+            return
+
+        try:
+            r = requests.get(f"http://{ip}/json", timeout=2)
+            if r.status_code != 200:
+                return
+
+            data = r.json()
+            segs = data.get("state", {}).get("seg", [])
+            if not segs:
+                return
+
+            current_fx = segs[0].get("fx", None)
+            if current_fx is None:
+                return
+
+            for i in range(self.list_effects.count()):
+                item = self.list_effects.item(i)
+                if item.data(Qt.UserRole) == current_fx:
+                    self.list_effects.setCurrentRow(i)
+                    break
+
+        except Exception:
+            pass
+
+
+    # ==================
+    # Tải danh sách preset
     def load_preset_list(self):
         pass
 
-    def on_effect_selected(self, item):
-        pass
-
+    # ====================
+    # Khi click chọn preset → chạy ngay
     def on_preset_selected(self, item):
         pass
 
@@ -439,7 +609,7 @@ class BMPConverter(QWidget):
         self.load_device_info()
         self.load_effect_list()
         self.load_preset_list()
-
+        self.highlight_current_effect()
 
     # ====================
     # Mở trang cài đặt ARGB (KIỂM TRA ONLINE TRƯỚC)
@@ -981,6 +1151,12 @@ class BMPConverter(QWidget):
 
                 # ⭐ GỌI LOAD INFO NGAY
                 self.load_device_info()
+                # ⭐ LOAD EFFECT + PRESET
+                self.load_effect_list()
+                # ⭐ LOAD PRESET
+                self.load_preset_list()
+                # ⭐ refresh data
+                self.refresh_device_data()
 
             else:
                 self.combo_ip.addItem("Không tìm thấy mạch ARGB HSL")
