@@ -15,6 +15,7 @@ class BMPConverter(QWidget):
         self.setWindowTitle(APP_TITLE)
         self.setWindowIcon(QIcon("favicon.ico"))
 
+        # ==== Thiết lập kích thước cửa sổ ====
         screen = QGuiApplication.primaryScreen().availableGeometry()
         screen_width = screen.width()
         screen_height = screen.height()
@@ -135,6 +136,8 @@ class BMPConverter(QWidget):
         self.combo_ip.setEditable(True)
         self.combo_ip.setMinimumWidth(200)
         layout_mach.addWidget(self.combo_ip)
+        # Tự động load info khi chọn IP
+        self.combo_ip.currentIndexChanged.connect(self.load_device_info)
 
         btn_scan = QPushButton("🔍 Tìm ARGB")
         btn_scan.clicked.connect(self.scan_argb_mdns)
@@ -183,27 +186,27 @@ class BMPConverter(QWidget):
         # ==== vùng preview ====
         frame = QFrame()
         main.addWidget(frame, 1)
-        
-        # ==== CHIA FRAME THÀNH 2 VÙNG ====
+
+        # ==== CHIA FRAME THÀNH 3 VÙNG ====
         layout_main = QHBoxLayout(frame)
         layout_main.setContentsMargins(0, 0, 0, 0)
         layout_main.setSpacing(10)
 
-        # ========== VÙNG TRÁI (cột nhỏ chứa nút) ==========
+        # ==========================================================
+        # ========== CỘT 1 – FN (GIỮ NGUYÊN) ========================
+        # ==========================================================
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(5, 5, 5, 5)
         left_layout.setSpacing(8)
-
 
         # Các nút đồng bộ giao diện
         btn_load = QPushButton("🔄 Làm mới preview")
         btn_load.clicked.connect(lambda: (
             self.lbl_preview.setImage(None),
             self.index_bar.setCount(0),
-            setattr(self, "loaded_image", None)         # xoá ảnh gốc → send_to_argb không gửi được nữa
+            setattr(self, "loaded_image", None)
         ))
-
 
         btn_save = QPushButton("💾 Lưu BMP từ preview")
         btn_save.clicked.connect(self.save_as_bmp)
@@ -217,7 +220,7 @@ class BMPConverter(QWidget):
 
         # ====== Nhóm nút chức năng FN1 → FN10 ======
         lbl_fn = QLabel("Phím chức năng nhanh:")
-        lbl_fn.setWordWrap(True)   # 👈 giú
+        lbl_fn.setWordWrap(True)
         left_layout.addWidget(lbl_fn)
 
         for i in range(1, 11):
@@ -225,22 +228,22 @@ class BMPConverter(QWidget):
             btn.setMinimumWidth(150)
 
             if i == 1:
-                btn = QPushButton(f"Chạy tất cả Presets (F{i})")
+                btn.setText("Chạy tất cả Presets (F1)")
                 btn.clicked.connect(self.fn1_run_playlist)
             elif i == 2:
-                btn = QPushButton(f"Xóa tất cả Presets (F{i})")
+                btn.setText("Xóa tất cả Presets (F2)")
                 btn.clicked.connect(self.fn2_clear_presets)
             elif i == 10:
-                btn = QPushButton(f"Tắt LED và Reboot (F{i})")
+                btn.setText("Tắt LED và Reboot (F10)")
                 btn.clicked.connect(self.fn_reboot_device)
             else:
                 btn.clicked.connect(lambda _, x=i: self.fn_placeholder(x))
 
             left_layout.addWidget(btn)
 
-
         left_layout.addStretch()
-        # ==== Thiết lập phím tắt cho FN1 và FN2 ====
+
+        # Phím tắt
         self.shortcut_f1 = QShortcut(QKeySequence(Qt.Key_F1), self)
         self.shortcut_f1.activated.connect(self.fn1_run_playlist)
         self.shortcut_f2 = QShortcut(QKeySequence(Qt.Key_F2), self)
@@ -248,11 +251,53 @@ class BMPConverter(QWidget):
         self.shortcut_f10 = QShortcut(QKeySequence(Qt.Key_F10), self)
         self.shortcut_f10.activated.connect(self.fn_reboot_device)
 
-
         left_panel.setFixedWidth(180)
         layout_main.addWidget(left_panel)
 
-        # ========== VÙNG PHẢI (INDEX BAR + PREVIEW) ==========
+        # ==========================================================
+        # ========== CỘT 2 – INFO / EFFECT / PRESET =================
+        # ==========================================================
+        mid_panel = QWidget()
+        mid_layout = QVBoxLayout(mid_panel)
+        mid_layout.setContentsMargins(5, 5, 5, 5)
+        mid_layout.setSpacing(6)
+        mid_panel.setFixedWidth(180)   # 👈 bằng cột FN
+
+        # ---------- HÀNG 1: INFO ----------
+        lbl_info_title = QLabel("ℹ️ Thông tin thiết bị")
+        lbl_info_title.setStyleSheet("font-weight: bold;")
+        mid_layout.addWidget(lbl_info_title)
+
+        self.lbl_device_info = QLabel("Chưa kết nối")
+        self.lbl_device_info.setWordWrap(True)
+        self.lbl_device_info.setMinimumHeight(60)
+        mid_layout.addWidget(self.lbl_device_info)
+
+        # ---------- HÀNG 2: EFFECT LIST ----------
+        lbl_fx = QLabel("✨ Effects")
+        lbl_fx.setStyleSheet("font-weight: bold;")
+        mid_layout.addWidget(lbl_fx)
+
+        self.list_effects = QListWidget()
+        self.list_effects.setSelectionMode(QListWidget.SingleSelection)
+        self.list_effects.itemClicked.connect(self.on_effect_selected)
+        mid_layout.addWidget(self.list_effects, 1)   # scroll được
+
+        # ---------- HÀNG 3: PRESET LIST ----------
+        lbl_ps = QLabel("📦 Presets")
+        lbl_ps.setStyleSheet("font-weight: bold;")
+        mid_layout.addWidget(lbl_ps)
+
+        self.list_presets = QListWidget()
+        self.list_presets.setSelectionMode(QListWidget.SingleSelection)
+        self.list_presets.itemClicked.connect(self.on_preset_selected)
+        mid_layout.addWidget(self.list_presets, 1)
+
+        layout_main.addWidget(mid_panel)
+
+        # ==========================================================
+        # ========== CỘT 3 – PREVIEW (GIỮ NGUYÊN) ===================
+        # ==========================================================
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -267,7 +312,6 @@ class BMPConverter(QWidget):
         self.lbl_preview = PixelPreview()
         right_layout.addWidget(self.lbl_preview)
 
-        # Thêm panel phải vào layout (chiếm toàn bộ phần còn lại)
         layout_main.addWidget(right_panel, 1)
 
 
@@ -323,6 +367,78 @@ class BMPConverter(QWidget):
             return r.status_code == 200
         except:
             return False
+
+    # ====================
+    # Tải dữ liệu thiết bị, effect, preset
+    # ====================
+    # Tải dữ liệu thiết bị (name, ver, wifi signal)
+    def load_device_info(self):
+        ip = self.combo_ip.currentData()
+        if not ip:
+            self.lbl_device_info.setText("❌ Chưa chọn mạch")
+            return
+
+        try:
+            r = requests.get(f"http://{ip}/json", timeout=3)
+
+            if r.status_code != 200:
+                self.lbl_device_info.setText(f"❌ Lỗi HTTP {r.status_code}")
+                return
+
+            data = r.json()
+            info = data.get("info", {})
+
+            # --- Lấy thông tin cần thiết ---
+            name = info.get("name", "N/A")
+            ver = info.get("ver", "N/A")
+
+            wifi = info.get("wifi", {})
+            signal = wifi.get("signal", None)   # %
+            rssi = wifi.get("rssi", None)       # dBm
+
+            # --- Chuẩn hóa hiển thị signal ---
+            if signal is not None:
+                signal_str = f"{signal}%"
+            elif rssi is not None:
+                signal_str = f"{rssi} dBm"
+            else:
+                signal_str = "N/A"
+
+            # --- Hiển thị ---
+            self.lbl_device_info.setText(
+                f"📛 Tên: {name}\n"
+                f"🧩 FW: {ver}\n"
+                f"📶 WiFi: {signal_str}"
+            )
+
+        except requests.exceptions.Timeout:
+            self.lbl_device_info.setText("⏱️ Timeout kết nối")
+
+        except requests.exceptions.ConnectionError:
+            self.lbl_device_info.setText("❌ Không kết nối được")
+
+        except Exception as e:
+            self.lbl_device_info.setText(f"⚠️ Lỗi:\n{e}")
+
+    
+    # ====================
+    # Tải danh sách effect
+    def load_effect_list(self):
+        pass
+
+    def load_preset_list(self):
+        pass
+
+    def on_effect_selected(self, item):
+        pass
+
+    def on_preset_selected(self, item):
+        pass
+
+    def refresh_device_data(self):
+        self.load_device_info()
+        self.load_effect_list()
+        self.load_preset_list()
 
 
     # ====================
@@ -816,23 +932,35 @@ class BMPConverter(QWidget):
         class WledListener:
             def add_service(self, zeroconf, type, name):
                 info = zeroconf.get_service_info(type, name)
-                if info:
-                    ip_bytes = info.addresses[0]
-                    ip = ".".join(str(b) for b in ip_bytes)
+                if not info or not info.addresses:
+                    return
 
-                    if ip not in found_devices:
-                        try:
-                            r = requests.get(f"http://{ip}/json", timeout=0.25)
-                            j = r.json()
-                            if "info" in j and j["info"].get("brand") == "ARGB":
-                                dev_name = j["info"].get("name", "Unnamed")
-                                found_devices[ip] = dev_name
-                                print(f"[mDNS] Phát hiện ARGB HSL: {ip} ({dev_name})")
-                        except Exception as e:
-                            print(f"[mDNS] Lỗi kiểm tra JSON từ {ip}: {e}")
+                ip_bytes = info.addresses[0]
+                ip = ".".join(str(b) for b in ip_bytes)
+
+                if ip in found_devices:
+                    return
+
+                try:
+                    r = requests.get(f"http://{ip}/json", timeout=0.3)
+                    if r.status_code != 200:
+                        return
+
+                    j = r.json()
+                    info_j = j.get("info", {})
+
+                    # ⚠️ đúng theo firmware HSL của bạn
+                    if info_j.get("name") and info_j.get("repo") == "HappySmartLight":
+                        dev_name = info_j.get("name", "ARGB")
+                        found_devices[ip] = dev_name
+                        print(f"[mDNS] Phát hiện ARGB HSL: {ip} ({dev_name})")
+
+                except Exception as e:
+                    print(f"[mDNS] Lỗi kiểm tra JSON từ {ip}: {e}")
 
             def remove_service(self, zeroconf, type, name):
                 pass
+
             def update_service(self, zeroconf, type, name):
                 pass
 
@@ -843,10 +971,17 @@ class BMPConverter(QWidget):
         def finish_scan():
             zeroconf.close()
             self.combo_ip.clear()
+
             if found_devices:
                 for ip, dev_name in found_devices.items():
-                    # hiển thị Tên (IP)
                     self.combo_ip.addItem(f"{dev_name} ({ip})", userData=ip)
+
+                # ⭐ TỰ ĐỘNG CHỌN THIẾT BỊ ĐẦU TIÊN
+                self.combo_ip.setCurrentIndex(0)
+
+                # ⭐ GỌI LOAD INFO NGAY
+                self.load_device_info()
+
             else:
                 self.combo_ip.addItem("Không tìm thấy mạch ARGB HSL")
 
