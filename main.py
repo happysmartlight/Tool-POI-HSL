@@ -80,10 +80,10 @@ class BMPConverter(QWidget):
         layout_pixel.addWidget(note)
 
         # ==== GROUP MÀU LED (COLOR WHEEL) ====
-        grp_color = QGroupBox("🎨 Màu LED (col)")
+        grp_color = QGroupBox("🎨 Màu LED")
         layout_color = QVBoxLayout(grp_color)
         layout_color.setSpacing(6)
-    
+
         labels = [
             "🎨 Màu chính",
             "🌑 Màu nền",
@@ -276,6 +276,33 @@ class BMPConverter(QWidget):
         left_layout.setContentsMargins(5, 5, 5, 5)
         left_layout.setSpacing(8)
 
+
+        # ---------- THÔNG TIN THIẾT BỊ (CHUYỂN SANG CỘT TRÁI) ----------
+        lbl_info_title = QLabel("ℹ️ Thông tin thiết bị")
+        lbl_info_title.setStyleSheet("font-weight: bold;")
+        left_layout.addWidget(lbl_info_title)
+
+        self.lbl_device_info = QLabel("Chưa kết nối")
+        self.lbl_device_info.setWordWrap(True)
+        self.lbl_device_info.setMinimumHeight(70)
+        self.lbl_device_info.setStyleSheet("""
+            QLabel {
+                background-color: #1e1e1e;
+                border: 1px solid #333;
+                border-radius: 4px;
+                padding: 6px;
+                color: #ddd;
+                font-size: 11px;
+            }
+        """)
+        left_layout.addWidget(self.lbl_device_info)
+
+        # ====== Đường phân cách ngang ======
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
+        left_layout.addWidget(line)
+
         # Các nút đồng bộ giao diện
         btn_load = QPushButton("🔄 Làm mới preview")
         btn_load.clicked.connect(lambda: (
@@ -336,17 +363,7 @@ class BMPConverter(QWidget):
         mid_layout.setSpacing(6)
         mid_panel.setFixedWidth(180)   # 👈 bằng cột FN
 
-        # ---------- HÀNG 1: INFO ----------
-        lbl_info_title = QLabel("ℹ️ Thông tin thiết bị")
-        lbl_info_title.setStyleSheet("font-weight: bold;")
-        mid_layout.addWidget(lbl_info_title)
-
-        self.lbl_device_info = QLabel("Chưa kết nối")
-        self.lbl_device_info.setWordWrap(True)
-        self.lbl_device_info.setMinimumHeight(60)
-        mid_layout.addWidget(self.lbl_device_info)
-
-        # ---------- HÀNG 2: EFFECT LIST ----------
+        # ---------- HÀNG 1: EFFECT LIST ----------
         lbl_fx = QLabel("✨ Hiệu ứng (Effects)")
         lbl_fx.setStyleSheet("font-weight: bold;")
         mid_layout.addWidget(lbl_fx)
@@ -358,7 +375,7 @@ class BMPConverter(QWidget):
         # Khi Double-click effect → lưu thành preset
         self.list_effects.itemDoubleClicked.connect(self.on_effect_double_clicked)
 
-        # ---------- HÀNG 3: PRESET LIST ----------
+        # ---------- HÀNG 2: PRESET LIST ----------
         lbl_ps = QLabel("📦 Presets")
         lbl_ps.setStyleSheet("font-weight: bold;")
         mid_layout.addWidget(lbl_ps)
@@ -369,6 +386,18 @@ class BMPConverter(QWidget):
         mid_layout.addWidget(self.list_presets, 1)
 
         layout_main.addWidget(mid_panel)
+
+        # ---------- HÀNG 4: PALETTE ----------
+        lbl_palette_title = QLabel("🎨 Bảng màu (Palette)")
+        lbl_palette_title.setStyleSheet("font-weight: bold;")
+        mid_layout.addWidget(lbl_palette_title)
+
+        self.list_palettes = QListWidget()
+        self.list_palettes.setMinimumHeight(150)
+        self.list_palettes.itemClicked.connect(self.on_palette_selected)
+        mid_layout.addWidget(self.list_palettes, 1)
+
+
 
         # ==========================================================
         # ========== CỘT 3 – PREVIEW (GIỮ NGUYÊN) ===================
@@ -530,7 +559,7 @@ class BMPConverter(QWidget):
 
 
     # ====================
-    # Tải dữ liệu thiết bị (name, ver, wifi signal)
+    # Tải dữ liệu thiết bị (name, ver, wifi, filesystem)
     def load_device_info(self):
         ip = self.combo_ip.currentData()
         if not ip:
@@ -547,15 +576,15 @@ class BMPConverter(QWidget):
             data = r.json()
             info = data.get("info", {})
 
-            # --- Lấy thông tin cần thiết ---
+            # --- Thông tin thiết bị ---
             name = info.get("name", "N/A")
             ver = info.get("ver", "N/A")
 
+            # --- WiFi ---
             wifi = info.get("wifi", {})
             signal = wifi.get("signal", None)   # %
             rssi = wifi.get("rssi", None)       # dBm
 
-            # --- Chuẩn hóa hiển thị signal ---
             if signal is not None:
                 signal_str = f"{signal}%"
             elif rssi is not None:
@@ -563,11 +592,23 @@ class BMPConverter(QWidget):
             else:
                 signal_str = "N/A"
 
+            # --- Filesystem ---
+            fs = info.get("fs", {})
+            fs_used = fs.get("u", None)   # kB
+            fs_total = fs.get("t", None)  # kB
+
+            if fs_used is not None and fs_total:
+                fs_percent = int(fs_used * 100 / fs_total)
+                fs_str = f"{fs_used} / {fs_total} kB ({fs_percent}%)"
+            else:
+                fs_str = "N/A"
+
             # --- Hiển thị ---
             self.lbl_device_info.setText(
                 f"📛 Tên: {name}\n"
                 f"🧩 FW: {ver}\n"
-                f"📶 WiFi: {signal_str}"
+                f"📶 WiFi: {signal_str}\n"
+                f"📁 Bộ nhớ: {fs_str}"
             )
 
         except requests.exceptions.Timeout:
@@ -578,6 +619,7 @@ class BMPConverter(QWidget):
 
         except Exception as e:
             self.lbl_device_info.setText(f"⚠️ Lỗi:\n{e}")
+
 
     
     # ====================
@@ -865,10 +907,78 @@ class BMPConverter(QWidget):
             print(f"[Preset] Lỗi chạy preset {preset_id}: {e}")
 
 
+    # ====================
+    # Tải danh sách palette
+    def load_palette_list(self):
+        ip = self.combo_ip.currentData()
+        if not ip:
+            return
+
+        self.list_palettes.clear()
+
+        try:
+            r = requests.get(f"http://{ip}/json", timeout=3)
+            if r.status_code != 200:
+                return
+
+            j = r.json()
+            palettes = j.get("palettes", [])
+
+            if not isinstance(palettes, list):
+                return
+
+            for pid, name in enumerate(palettes):
+                item = QListWidgetItem(f"[{pid}] {name}")
+                item.setData(Qt.UserRole, pid)
+                item.setToolTip(f"Palette ID: {pid}")
+                self.list_palettes.addItem(item)
+
+        except Exception as e:
+            print(f"[load_palette_list] Lỗi: {e}")
+
+
+    # ====================
+    # Khi click chọn palette → áp dụng ngay
+    def on_palette_selected(self, item):
+        ip = self.combo_ip.currentData()
+        if not ip or not item:
+            return
+
+        pal_id = item.data(Qt.UserRole)
+
+        payload = {
+            "seg": [
+                {
+                    "id": 0,
+                    "pal": pal_id
+                }
+            ]
+        }
+
+        try:
+            r = requests.post(
+                f"http://{ip}/json/state",
+                json=payload,
+                timeout=2
+            )
+
+            if r.status_code != 200:
+                QMessageBox.warning(
+                    self,
+                    "Lỗi",
+                    f"Không áp dụng được palette!\nHTTP {r.status_code}"
+                )
+                return
+
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi", str(e))
+
+
     def refresh_device_data(self):
         self.load_device_info()
         self.load_effect_list()
         self.load_preset_list()
+        self.load_palette_list()
         self.highlight_current_effect()
 
     # ====================
@@ -1002,9 +1112,13 @@ class BMPConverter(QWidget):
 
 
     # ====================
-    # FN2: Xóa Preset + Xóa file BMP trong bộ nhớ WLED
+    # FN2: Xóa Preset + Xóa file BMP (có Progress)
     # ====================
     def fn2_clear_presets(self):
+        from PySide6.QtWidgets import QMessageBox, QProgressDialog, QApplication
+        from PySide6.QtCore import Qt
+        import requests
+
         ip = self.combo_ip.currentData()
         if not ip:
             QMessageBox.warning(self, "Lỗi", "Chưa chọn mạch ARGB hợp lệ.")
@@ -1040,42 +1154,54 @@ class BMPConverter(QWidget):
             return
 
         # ===============================================================
-        # ⭐ 2️⃣ LẤY PRESET (NẾU CÓ)
+        # ⭐ 2️⃣ LẤY DANH SÁCH PRESET
         # ===============================================================
         preset_ids = []
         try:
             r = requests.get(f"http://{ip}/presets.json", timeout=2)
             if r.status_code == 200:
                 presets = r.json()
-                preset_ids = [
+                preset_ids = sorted(
                     int(k) for k in presets.keys()
                     if k.isdigit() and int(k) >= 1
-                ]
-                preset_ids.sort()
+                )
         except:
-            pass   # ❗ Không return → vẫn cho phép xóa BMP
+            pass
 
         # ===============================================================
-        # ⭐ 3️⃣ ĐƯA THIẾT BỊ VỀ TRẠNG THÁI AN TOÀN (CHỈ KHI CÓ PRESET)
+        # ⭐ 3️⃣ XÓA PRESET (CÓ PROGRESS)
         # ===============================================================
         if preset_ids:
+            progress = QProgressDialog(
+                "🧹 Đang xóa preset...",
+                "Hủy",
+                0,
+                len(preset_ids),
+                self
+            )
+            progress.setWindowTitle("Xóa Preset")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.setValue(0)
+
             try:
+                # đưa về trạng thái an toàn
                 requests.post(f"http://{ip}/json/state", json={"ps": 0}, timeout=2)
                 requests.post(f"http://{ip}/json/state", json={"on": False}, timeout=2)
             except:
-                QMessageBox.warning(
-                    self,
-                    "Cảnh báo",
-                    "Không thể đưa thiết bị về trạng thái an toàn.\n"
-                    "Vẫn tiếp tục xóa preset & file BMP."
-                )
+                pass
 
-            # ===============================================================
-            # ⭐ 4️⃣ XÓA PRESET
-            # ===============================================================
             failed = []
 
-            for pid in preset_ids:
+            for idx, pid in enumerate(preset_ids, start=1):
+                if progress.wasCanceled():
+                    progress.close()
+                    QMessageBox.information(self, "Đã hủy", "⛔ Người dùng đã hủy xóa preset.")
+                    return
+
+                progress.setLabelText(f"🧹 Xóa preset {pid} ({idx}/{len(preset_ids)})")
+                QApplication.processEvents()
+
                 try:
                     r = requests.post(
                         f"http://{ip}/json/state",
@@ -1086,6 +1212,11 @@ class BMPConverter(QWidget):
                         failed.append(pid)
                 except:
                     failed.append(pid)
+
+                progress.setValue(idx)
+                QApplication.processEvents()
+
+            progress.close()
 
             if failed:
                 QMessageBox.warning(
@@ -1099,17 +1230,9 @@ class BMPConverter(QWidget):
                     "Preset đã xóa",
                     f"🎉 Đã xóa {len(preset_ids)} preset thành công!"
                 )
-                # Cập nhật lại danh sách preset
-                self.refresh_device_data()
-        else:
-            QMessageBox.information(
-                self,
-                "Không có preset",
-                "Không tìm thấy preset nào.\nTiếp tục xử lý xóa file BMP."
-            )
 
         # ===============================================================
-        # ⭐ 6️⃣ HỎI CÓ MUỐN XÓA FILE BMP KHÔNG
+        # ⭐ 4️⃣ HỎI CÓ MUỐN XÓA FILE BMP KHÔNG
         # ===============================================================
         if QMessageBox.question(
             self,
@@ -1117,97 +1240,66 @@ class BMPConverter(QWidget):
             "Bạn có muốn xóa toàn bộ file ảnh (*.bmp) trong bộ nhớ thiết bị không?",
             QMessageBox.Yes | QMessageBox.No
         ) != QMessageBox.Yes:
+            self.refresh_device_data()
             return
 
         # ===============================================================
-        # ⭐ 7️⃣ LẤY DANH SÁCH FILE /edit?list
+        # ⭐ 5️⃣ LẤY DANH SÁCH FILE BMP
         # ===============================================================
         try:
             r = requests.get(f"http://{ip}/edit?list", timeout=3)
 
-            # 🔐 Thiết bị bị khóa PIN
-            # 🔐 Thiết bị bị khóa PIN
             if r.status_code == 401:
-                msg = QMessageBox(self)
-                msg.setIcon(QMessageBox.Warning)
-                msg.setWindowTitle("Thiết bị bị khóa")
-                msg.setText(
-                    "🔒 Mạch ARGB đang bị khóa bằng mã PIN.\n\n"
-                    "Bạn muốn làm gì?"
-                )
-
-                btn_open = msg.addButton("🔐 Nhập / mở mã PIN", QMessageBox.AcceptRole)
-                btn_close = msg.addButton("❌ Đóng", QMessageBox.RejectRole)
-
-                msg.exec()
-
-                # --- User chọn mở PIN ---
-                if msg.clickedButton() == btn_open:
-                    # mở popup PIN nhúng
-                    self.open_pin_browser_popup(ip)
-
-                    # thử lại ngay logic đang xử lý
-                    try:
-                        r = requests.get(f"http://{ip}/edit?list", timeout=3)
-                    except Exception as e:
-                        QMessageBox.critical(self, "Lỗi", f"Không lấy lại danh sách file:\n{e}")
-                        return
-
-                    if r.status_code != 200:
-                        QMessageBox.warning(
-                            self,
-                            "Chưa mở được PIN",
-                            f"❌ Không thể truy cập thiết bị sau khi nhập PIN.\nHTTP {r.status_code}"
-                        )
-                        return
-
-                    # nếu OK → r sẽ được xử lý tiếp phía dưới
-
-                else:
-                    # User nhấn Đóng
-                    return
-
+                self.open_pin_browser_popup(ip)
+                r = requests.get(f"http://{ip}/edit?list", timeout=3)
 
             if r.status_code != 200:
-                QMessageBox.critical(
-                    self,
-                    "Lỗi",
-                    f"Không lấy được danh sách file!\nHTTP {r.status_code}"
-                )
+                QMessageBox.critical(self, "Lỗi", f"Không lấy được danh sách file! HTTP {r.status_code}")
                 return
 
             files = r.json()
-            if not isinstance(files, list):
-                QMessageBox.critical(self, "Lỗi", "Phản hồi không đúng dạng list!")
-                return
-
             bmp_files = [
                 f["name"]
                 for f in files
                 if isinstance(f, dict)
                 and "name" in f
-                and isinstance(f["name"], str)
                 and f["name"].lower().endswith(".bmp")
             ]
-
         except Exception as e:
             QMessageBox.critical(self, "Lỗi", f"Không đọc danh sách file:\n{e}")
             return
 
         if not bmp_files:
-            QMessageBox.information(
-                self,
-                "Không có file BMP",
-                "Thiết bị không có file ảnh BMP để xóa."
-            )
+            QMessageBox.information(self, "Không có file BMP", "Không có file BMP để xóa.")
+            self.refresh_device_data()
             return
 
         # ===============================================================
-        # ⭐ 8️⃣ XÓA FILE BMP
+        # ⭐ 6️⃣ XÓA FILE BMP (CÓ PROGRESS)
         # ===============================================================
+        progress = QProgressDialog(
+            "🗑️ Đang xóa file BMP...",
+            "Hủy",
+            0,
+            len(bmp_files),
+            self
+        )
+        progress.setWindowTitle("Xóa ảnh BMP")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
         failed_bmp = []
 
-        for filename in bmp_files:
+        for idx, filename in enumerate(bmp_files, start=1):
+            if progress.wasCanceled():
+                progress.close()
+                QMessageBox.information(self, "Đã hủy", "⛔ Người dùng đã hủy xóa file BMP.")
+                return
+
+            progress.setLabelText(f"🗑️ Xóa {filename} ({idx}/{len(bmp_files)})")
+            QApplication.processEvents()
+
             try:
                 rr = requests.get(
                     f"http://{ip}/edit",
@@ -1219,9 +1311,11 @@ class BMPConverter(QWidget):
             except:
                 failed_bmp.append(filename)
 
-        # ===============================================================
-        # ⭐ 9️⃣ BÁO CÁO
-        # ===============================================================
+            progress.setValue(idx)
+            QApplication.processEvents()
+
+        progress.close()
+
         if failed_bmp:
             QMessageBox.warning(
                 self,
@@ -1234,6 +1328,9 @@ class BMPConverter(QWidget):
                 "Hoàn tất",
                 f"🎉 Đã xóa toàn bộ {len(bmp_files)} file BMP thành công!"
             )
+
+        self.refresh_device_data()
+
 
     # ====================
     # FN: Tắt LED và Khởi động lại thiết bị WLED (2 bước xác minh)
@@ -1921,14 +2018,15 @@ class BMPConverter(QWidget):
 
 
     # ====================
-    # Gửi nhiều ảnh đến ARGB (Preset tăng dần, đặt tên preset theo tên ảnh)
+    # Gửi nhiều ảnh đến ARGB (Preset tăng dần, có Progress)
     # ====================
     def send_multiple_to_argb(self):
-        from PySide6.QtWidgets import QFileDialog, QMessageBox
-        from PySide6.QtCore import QUrl
+        from PySide6.QtWidgets import QFileDialog, QMessageBox, QProgressDialog
+        from PySide6.QtCore import Qt, QUrl
         from PySide6.QtGui import QDesktopServices
         from PIL import Image
         import tempfile, os, requests, re
+        from PySide6.QtWidgets import QApplication
 
         # 1️⃣ Lấy IP mạch
         ip = self.combo_ip.currentData()
@@ -1955,73 +2053,94 @@ class BMPConverter(QWidget):
             QMessageBox.critical(self, "Lỗi", f"Không thể load ảnh: {e}")
             return
 
-        # 5️⃣ Gửi từng ảnh theo thứ tự
+        total = len(images)
+
+        # ====================
+        # PROGRESS DIALOG
+        progress = QProgressDialog(
+            "Chuẩn bị gửi ảnh...",
+            "Hủy",
+            0,
+            total,
+            self
+        )
+        progress.setWindowTitle("📤 Đang gửi ảnh lên ARGB")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
+        # ====================
+        # 5️⃣ Gửi từng ảnh
         for idx, (path, img) in enumerate(images, start=1):
 
-            # 🧩 A) Tạo tên preset từ tên file
+            if progress.wasCanceled():
+                QMessageBox.information(self, "Đã hủy", "⛔ Người dùng đã hủy quá trình gửi.")
+                return
+
+            progress.setLabelText(
+                f"📤 Đang gửi ảnh {idx}/{total}\n"
+                f"{os.path.basename(path)}"
+            )
+            QApplication.processEvents()
+
+            # 🧩 A) Tạo tên preset
             base = os.path.basename(path)
             name_no_ext = os.path.splitext(base)[0]
-
-            # Giữ lại ký tự hợp lệ
             safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", name_no_ext)
-
-            # Giới hạn 20 ký tự
             preset_name = safe_name[:20] if len(safe_name) > 20 else safe_name
             if not preset_name:
                 preset_name = f"Preset_{idx}"
 
-            # 🧩 B) Tạo tên file BMP upload (dễ nhìn trong /edit)
             upload_filename = preset_name + ".bmp"
 
-            while True:  # Vòng lặp hỗ trợ Retry nếu 401
+            while True:  # retry loop (PIN / retry)
+                tmp_file = None
                 try:
-                    # Chuyển ảnh sang vuông RGB
+                    # 🧩 B) Convert ảnh
                     bmp_image = self._convert_to_square_rgb(w, img)
 
-                    # Lưu ảnh BMP tạm
                     tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".bmp")
                     bmp_image.save(tmp_file.name, "BMP")
                     tmp_file.close()
 
-                    # 📌 C) Upload file BMP với tên customs
-                    url_upload = f"http://{ip}/upload"
+                    # 🧩 C) Upload BMP
                     with open(tmp_file.name, "rb") as f:
-                        files = {
-                            "data": (upload_filename, f, "image/bmp")
-                        }
-                        r = requests.post(url_upload, files=files, timeout=5)
+                        files = {"data": (upload_filename, f, "image/bmp")}
+                        r = requests.post(
+                            f"http://{ip}/upload",
+                            files=files,
+                            timeout=10
+                        )
 
-                    # --- Xử lý lỗi PIN (401) ---
+                    # --- PIN 401 ---
                     if r.status_code == 401:
                         msg = QMessageBox(self)
                         msg.setWindowTitle("Thiết bị đang bị khóa (401)")
-                        msg.setText(
-                            "Thiết bị yêu cầu mã PIN để truy cập.\n"
-                            "Bạn muốn làm gì?"
-                        )
-                        btn_open = msg.addButton("Mở trang PIN", QMessageBox.ActionRole)
+                        msg.setText("Thiết bị yêu cầu mã PIN.\nBạn muốn làm gì?")
+                        btn_open = msg.addButton("Nhập mã PIN", QMessageBox.ActionRole)
                         btn_retry = msg.addButton("Gửi lại", QMessageBox.AcceptRole)
                         btn_cancel = msg.addButton("Hủy", QMessageBox.RejectRole)
                         msg.exec()
 
                         clicked = msg.clickedButton()
-
                         if clicked == btn_open:
-                            # QDesktopServices.openUrl(QUrl(f"http://{ip}/settings/sec"))
                             self.open_pin_browser_popup(ip)
                             continue
                         elif clicked == btn_retry:
                             continue
                         else:
+                            progress.close()
                             return
 
                     elif r.status_code != 200:
-                        QMessageBox.warning(self, "Lỗi Upload",
-                            f"Upload thất bại!\nHTTP {r.status_code}")
+                        QMessageBox.warning(
+                            self, "Lỗi Upload",
+                            f"Upload thất bại!\nHTTP {r.status_code}"
+                        )
+                        progress.close()
                         return
 
-                    # 🌟 D) Lưu preset
-                    url_state = f"http://{ip}/json/state"
+                    # 🧩 D) Lưu preset
                     payload = {
                         "on": True,
                         "bri": 100,
@@ -2034,28 +2153,44 @@ class BMPConverter(QWidget):
                                 "fx": 48
                             }
                         ],
-                        "psave": idx,        # Lưu preset ID tăng dần
-                        "n": preset_name      # 🌟 Đặt tên preset
+                        "psave": idx,
+                        "n": preset_name
                     }
 
-                    r2 = requests.post(url_state, json=payload, timeout=5)
-                    if r2.status_code != 200:
-                        QMessageBox.warning(self, "Lỗi", f"Không lưu preset! HTTP {r2.status_code}")
+                    r2 = requests.post(
+                        f"http://{ip}/json/state",
+                        json=payload,
+                        timeout=10
+                    )
 
-                    # Thành công → break vòng retry
-                    break
+                    if r2.status_code != 200:
+                        QMessageBox.warning(
+                            self, "Lỗi",
+                            f"Không lưu preset!\nHTTP {r2.status_code}"
+                        )
+
+                    break  # ✅ xong ảnh này
 
                 except Exception as e:
                     QMessageBox.critical(self, "Lỗi", f"Lỗi khi gửi ảnh:\n{e}")
-                    break
+                    progress.close()
+                    return
 
                 finally:
-                    # Xóa file tạm
-                    if os.path.exists(tmp_file.name):
+                    if tmp_file and os.path.exists(tmp_file.name):
                         os.unlink(tmp_file.name)
 
-        QMessageBox.information(self, "Hoàn tất", "🎉 Tất cả ảnh đã gửi và lưu preset thành công!")
-        # Cập nhật lại danh sách preset
+            progress.setValue(idx)
+            QApplication.processEvents()
+
+        progress.close()
+
+        QMessageBox.information(
+            self,
+            "Hoàn tất",
+            f"🎉 Đã gửi và lưu {total} ảnh thành công!"
+        )
+
         self.refresh_device_data()
 
 
