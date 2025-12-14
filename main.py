@@ -25,8 +25,8 @@ class BMPConverter(QWidget):
         screen_height = screen.height()
 
         # Resize theo tỉ lệ
-        win_w = int(screen_width * 0.60)
-        win_h = int(screen_height * 0.90)
+        win_w = int(screen_width * 1)
+        win_h = int(screen_height * 1)
         self.resize(win_w, win_h)
 
         # Căn giữa màn hình
@@ -304,7 +304,7 @@ class BMPConverter(QWidget):
         left_layout.addWidget(line)
 
         # Các nút đồng bộ giao diện
-        btn_load = QPushButton("🔄 Làm mới preview")
+        btn_load = QPushButton("🖼️ Làm mới Preview")
         btn_load.clicked.connect(lambda: (
             self.lbl_preview.setImage(None),
             self.index_bar.setCount(0),
@@ -312,7 +312,7 @@ class BMPConverter(QWidget):
         ))
         left_layout.addWidget(btn_load)
 
-        btn_save = QPushButton("🔄 Làm mới thông tin")
+        btn_save = QPushButton("ℹ️ Làm mới thông tin")
         btn_save.clicked.connect(self.refresh_device_data)
         left_layout.addWidget(btn_save)
 
@@ -328,13 +328,13 @@ class BMPConverter(QWidget):
             btn.setMinimumWidth(150)
 
             if i == 1:
-                btn.setText("Chạy tất cả Presets (F1)")
+                btn.setText("💡 Chạy tất cả Presets (F1)")
                 btn.clicked.connect(self.fn1_run_playlist)
             elif i == 2:
-                btn.setText("Xóa tất cả Presets (F2)")
+                btn.setText("🗑️ Xóa tất cả Presets (F2)")
                 btn.clicked.connect(self.fn2_clear_presets)
             elif i == 10:
-                btn.setText("Tắt LED và Reboot (F10)")
+                btn.setText("🔄 Khởi động lại mạch (F10)")
                 btn.clicked.connect(self.fn_reboot_device)
             else:
                 btn.clicked.connect(lambda _, x=i: self.fn_placeholder(x))
@@ -557,6 +557,13 @@ class BMPConverter(QWidget):
         except:
             return False
 
+    def _fs_icon(self, percent: int) -> str:
+        if percent >= 85:
+            return "🔴"
+        elif percent >= 70:
+            return "🟡"
+        else:
+            return "🟢"
 
     # ====================
     # Tải dữ liệu thiết bị (name, ver, wifi, filesystem)
@@ -567,6 +574,15 @@ class BMPConverter(QWidget):
             return
 
         try:
+            # 🔄 TRIGGER REFRESH FILESYSTEM (preset ảo)
+            try:
+                requests.post(
+                    f"http://{ip}/json/state",
+                    json={"pdel": 250},
+                    timeout=2
+                )
+            except:
+                pass  # ❗ Không được để fail bước chính
             r = requests.get(f"http://{ip}/json", timeout=3)
 
             if r.status_code != 200:
@@ -582,34 +598,42 @@ class BMPConverter(QWidget):
 
             # --- WiFi ---
             wifi = info.get("wifi", {})
-            signal = wifi.get("signal", None)   # %
-            rssi = wifi.get("rssi", None)       # dBm
+            signal = wifi.get("signal")  # %
 
             if signal is not None:
-                signal_str = f"{signal}%"
-            elif rssi is not None:
-                signal_str = f"{rssi} dBm"
+                if signal >= 70:
+                    wifi_icon = "🟢"
+                elif signal >= 40:
+                    wifi_icon = "🟡"
+                else:
+                    wifi_icon = "🔴"
+
+                wifi_str = f"{wifi_icon} {signal}%"
             else:
-                signal_str = "N/A"
+                wifi_str = "N/A"
+
 
             # --- Filesystem ---
             fs = info.get("fs", {})
-            fs_used = fs.get("u", None)   # kB
-            fs_total = fs.get("t", None)  # kB
+            fs_used = fs.get("u")
+            fs_total = fs.get("t")
 
             if fs_used is not None and fs_total:
                 fs_percent = int(fs_used * 100 / fs_total)
-                fs_str = f"{fs_used} / {fs_total} kB ({fs_percent}%)"
+                fs_icon = "🔴" if fs_percent >= 85 else "🟡" if fs_percent >= 70 else "🟢"
+                fs_str = f"{fs_icon} {fs_percent}%"
             else:
                 fs_str = "N/A"
 
-            # --- Hiển thị ---
+
             self.lbl_device_info.setText(
                 f"📛 Tên: {name}\n"
                 f"🧩 FW: {ver}\n"
-                f"📶 WiFi: {signal_str}\n"
+                f"📶 WiFi: {wifi_str}\n"
                 f"📁 Bộ nhớ: {fs_str}"
             )
+
+
 
         except requests.exceptions.Timeout:
             self.lbl_device_info.setText("⏱️ Timeout kết nối")
